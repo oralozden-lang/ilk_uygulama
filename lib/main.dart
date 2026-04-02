@@ -11706,36 +11706,31 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
     'Aralık',
   ];
 
+  StreamSubscription? _giderTurleriStream;
+
   @override
   void initState() {
     super.initState();
     _subeleriYukle();
-    _giderTurleriYukle();
+    _giderTurleriDinle();
   }
 
-  Future<void> _subeleriYukle() async {
-    final snap = await FirebaseFirestore.instance
-        .collection('subeler')
-        .orderBy('ad')
-        .get();
-    final adlar = <String, String>{};
-    for (final d in snap.docs) {
-      if (d.data()['aktif'] == false) continue;
-      adlar[d.id] = (d.data()['ad'] as String?) ?? d.id;
-    }
-    if (mounted) setState(() => _subeAdlari = adlar);
+  @override
+  void dispose() {
+    _giderTurleriStream?.cancel();
+    super.dispose();
   }
 
-  Future<void> _giderTurleriYukle() async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('ayarlar')
-          .doc('giderTurleri')
-          .get();
+  void _giderTurleriDinle() {
+    _giderTurleriStream = FirebaseFirestore.instance
+        .collection('ayarlar')
+        .doc('giderTurleri')
+        .snapshots()
+        .listen((doc) {
       final liste = (doc.data()?['liste'] as List?)
           ?.map((e) => e.toString())
           .toList();
-      if (mounted)
+      if (mounted) {
         setState(() {
           final ham2 = liste?.isNotEmpty == true
               ? liste!
@@ -11754,7 +11749,21 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
           ham2.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
           _giderTurleri = ham2;
         });
-    } catch (_) {}
+      }
+    });
+  }
+
+  Future<void> _subeleriYukle() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('subeler')
+        .orderBy('ad')
+        .get();
+    final adlar = <String, String>{};
+    for (final d in snap.docs) {
+      if (d.data()['aktif'] == false) continue;
+      adlar[d.id] = (d.data()['ad'] as String?) ?? d.id;
+    }
+    if (mounted) setState(() => _subeAdlari = adlar);
   }
 
   String _baslangicKey() {
