@@ -1,6 +1,6 @@
 {
-    "name": "ilk_uygulama",
-    "short_name": "ilk_uygulama",
+    "name": "Hesap Takip",
+    "short_name": "Hesap Takip",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
