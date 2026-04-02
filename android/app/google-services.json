@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "868455500626",
+    "project_id": "kasa-takip-7c650",
+    "storage_bucket": "kasa-takip-7c650.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:868455500626:android:c535e5ea724d0de33ec88b",
+        "android_client_info": {
+          "package_name": "com.example.ilk_uygulama"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGdwCp_wy51fPy34ZMSHLiSE-1Sv4snug"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

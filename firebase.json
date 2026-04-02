@@ -1,0 +1,45 @@
+{
+  "flutter": {
+    "platforms": {
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "kasa-takip-7c650",
+          "configurations": {
+            "ios": "1:868455500626:ios:9407ceae2e3f48293ec88b",
+            "macos": "1:868455500626:ios:9407ceae2e3f48293ec88b",
+            "web": "1:868455500626:web:306734f56d6900323ec88b",
+            "windows": "1:868455500626:web:0e2a4bb64b9b67de3ec88b"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/flutter_service_worker.js",
+        "headers": [{"key": "Cache-Control", "value": "no-cache"}]
+      },
+      {
+        "source": "**/*.js",
+        "headers": [{"key": "Cache-Control", "value": "no-cache"}]
+      },
+      {
+        "source": "**/*.wasm",
+        "headers": [{"key": "Cache-Control", "value": "no-cache"}]
+      }
+    ]
+  }
+}
