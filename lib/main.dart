@@ -12743,11 +12743,9 @@ class _GiderAdiAlaniState extends State<_GiderAdiAlani> {
 
     void kaydetVeKapat(BuildContext ctx, String deger) {
       final temiz = deger.trim();
-      if (temiz.isNotEmpty) {
-        widget.ctrl.text = temiz;
-        widget.ctrl.selection = TextSelection.collapsed(offset: temiz.length);
-        widget.onChanged?.call();
-      }
+      widget.ctrl.text = temiz;
+      widget.ctrl.selection = TextSelection.collapsed(offset: temiz.length);
+      widget.onChanged?.call();
       Navigator.pop(ctx);
     }
 
@@ -19394,6 +19392,8 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
   DateTime _bitis = DateTime.now();
 
   bool _karsilastirmaAcik = false;
+  String _karsilastirmaModu =
+      'ay'; // 'ay' veya 'aralik' — ana filtreden bağımsız
   int _karsilastirmaYil = DateTime.now().year;
   int _karsilastirmaAy = DateTime.now().month == 1
       ? 12
@@ -19473,18 +19473,18 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
   }
 
   String _karsilastirmaBasKey() {
-    if (_filtreModu == 'aralik') {
-      return '${_karsilastirmaBaslangic.year}-${_karsilastirmaBaslangic.month.toString().padLeft(2, '0')}-${_karsilastirmaBaslangic.day.toString().padLeft(2, '0')}';
+    if (_filtreModu == 'ay') {
+      return '${_karsilastirmaYil.toString().padLeft(4, '0')}-${_karsilastirmaAy.toString().padLeft(2, '0')}-01';
     }
-    return '${_karsilastirmaYil.toString().padLeft(4, '0')}-${_karsilastirmaAy.toString().padLeft(2, '0')}-01';
+    return _tarihKey(_karsilastirmaBaslangic);
   }
 
   String _karsilastirmaBitKey() {
-    if (_filtreModu == 'aralik') {
-      return '${_karsilastirmaBitis.year}-${_karsilastirmaBitis.month.toString().padLeft(2, '0')}-${_karsilastirmaBitis.day.toString().padLeft(2, '0')}';
+    if (_filtreModu == 'ay') {
+      final sonGun = DateTime(_karsilastirmaYil, _karsilastirmaAy + 1, 0).day;
+      return '${_karsilastirmaYil.toString().padLeft(4, '0')}-${_karsilastirmaAy.toString().padLeft(2, '0')}-${sonGun.toString().padLeft(2, '0')}';
     }
-    final sonGun = DateTime(_karsilastirmaYil, _karsilastirmaAy + 1, 0).day;
-    return '${_karsilastirmaYil.toString().padLeft(4, '0')}-${_karsilastirmaAy.toString().padLeft(2, '0')}-${sonGun.toString().padLeft(2, '0')}';
+    return _tarihKey(_karsilastirmaBitis);
   }
 
   Future<List<Map<String, dynamic>>> _veriCek(String bas, String bit) async {
@@ -19901,14 +19901,35 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                             oncekiAy + 1,
                             0,
                           );
+                          // Karşılaştırma modunu ana filtreden bağımsız başlat
+                          _karsilastirmaModu = _filtreModu;
                         }
                       });
                     },
                   ),
                   if (_karsilastirmaAcik) ...[
+                    // Mod seçici (ana filtreden bağımsız)
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(
+                          value: 'ay',
+                          label: Text('Ay'),
+                          icon: Icon(Icons.calendar_month, size: 14),
+                        ),
+                        ButtonSegment(
+                          value: 'aralik',
+                          label: Text('Tarih'),
+                          icon: Icon(Icons.date_range, size: 14),
+                        ),
+                      ],
+                      selected: {_karsilastirmaModu},
+                      onSelectionChanged: (s) =>
+                          setState(() => _karsilastirmaModu = s.first),
+                      style: ButtonStyle(visualDensity: VisualDensity.compact),
+                    ),
                     const SizedBox(height: 8),
-                    // Ana filtreye göre karşılaştırma UI
-                    if (_filtreModu == 'ay')
+                    // Ay modu: ay/yıl dropdown
+                    if (_karsilastirmaModu == 'ay')
                       Row(
                         children: [
                           Expanded(
@@ -19955,7 +19976,8 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                           ),
                         ],
                       ),
-                    if (_filtreModu == 'aralik')
+                    // Tarih aralığı modu: tarih seçici (bağımsız)
+                    if (_karsilastirmaModu == 'aralik')
                       Row(
                         children: [
                           Expanded(
