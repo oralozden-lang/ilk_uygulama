@@ -5188,7 +5188,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     if (!temelKosullar) return false;
     // Kullanıcı için limit kontrolleri — yönetici uyarı alır ama kapat yapabilir
     if (!yonetici) {
-      if (_kasaHarcamaLimitiAsildi) return false;
       if (_anaKasaLimitiAsildi) return false;
     }
     return true;
@@ -5215,11 +5214,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       _parseDouble(_bankayaYatiranCtrl.text) -
       _toplamAnaKasaHarcama -
       _toplamNakitCikis;
-
-  // Kasa harcama limiti aşıldı mı?
-  // Günlük harcamalar nakit TL'den fazla olamaz
-  bool get _kasaHarcamaLimitiAsildi =>
-      _toplamHarcama > _toplamNakitTL && _toplamNakitTL > 0;
 
   // Ana Kasa limiti aşıldı mı?
   // AK Harcama + Bankaya Yatan + Nakit Çıkış > Ana Kasa (önceki + günlük TL)
@@ -10512,41 +10506,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                           style: TextStyle(
                                             color: Colors.red[700],
                                             fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              // İnternet yok uyarısı
-                              // Kasa harcama limit uyarısı
-                              if (_kasaHarcamaLimitiAsildi)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.red[300]!),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.warning_amber_rounded,
-                                        color: Colors.red[700],
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'Harcama ${_formatTL(_toplamHarcama)} — Nakit TL ${_formatTL(_toplamNakitTL)} sinirini asiyor!',
-                                          style: TextStyle(
-                                            color: Colors.red[800],
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 12,
                                           ),
                                         ),
                                       ),
