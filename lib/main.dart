@@ -589,7 +589,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.0',
+                'v1.0.1',
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -4797,32 +4797,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           _dovizBankayaYatiranCtrl[t]!.text = _sifirTemizle(dovizBanka?[t]);
         }
       }
-      // Döviz devreden = o günün kaydındaki oncekiDovizKalanlari
-      // (bir önceki günün dovizAnaKasaKalanlari)
+      // Döviz devreden = o günün kaydındaki oncekiDovizAnaKasaKalanlari
+      // TL mantığıyla aynı: alan varsa kullan, yoksa 0
       final oncekiDovizKalanlar = data['oncekiDovizAnaKasaKalanlari'] as Map?;
-      final dovizKalanlar = data['dovizAnaKasaKalanlari'] as Map?;
       for (var t in _dovizTurleri) {
-        if (oncekiDovizKalanlar != null) {
-          _devredenDovizMiktarlari[t] = (oncekiDovizKalanlar[t] ?? 0)
-              .toDouble();
-        } else if (dovizKalanlar != null && dovizKalanlar[t] != null) {
-          final bugunMiktar = _dovizler
-              .where((d) => d['cins'] == t)
-              .fold(
-                0.0,
-                (sum, d) =>
-                    sum +
-                    (_parseDouble(
-                      (d['miktarCtrl'] as TextEditingController).text,
-                    )),
-              );
-          // Negatif çıkmasını önle — eski format kayıtlarda tutarsızlık olabilir
-          final hesap =
-              ((dovizKalanlar[t] ?? 0) as num).toDouble() - bugunMiktar;
-          _devredenDovizMiktarlari[t] = hesap < 0 ? 0 : hesap;
-        } else {
-          _devredenDovizMiktarlari[t] = 0;
-        }
+        _devredenDovizMiktarlari[t] = (oncekiDovizKalanlar?[t] ?? 0).toDouble();
       }
 
       // Transferler
