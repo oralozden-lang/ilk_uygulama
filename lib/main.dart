@@ -155,10 +155,11 @@ class KasaTakipApp extends StatelessWidget {
       title: 'Kasa Takip',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A3A5C)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0288D1)),
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFF0F9FF),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF1A3A5C),
+          backgroundColor: Color(0xFF0288D1),
           foregroundColor: Colors.white,
           elevation: 0,
         ),
@@ -226,7 +227,7 @@ class _KasaLogoPainter extends CustomPainter {
 
     // Kasa kapak çizgisi
     final cizgiPaint = Paint()
-      ..color = const Color(0xFF1A3A5C)
+      ..color = const Color(0xFF0288D1)
       ..strokeWidth = 2.5
       ..style = PaintingStyle.stroke;
     canvas.drawLine(
@@ -240,7 +241,7 @@ class _KasaLogoPainter extends CustomPainter {
       Offset(cx, cy + 8),
       6,
       Paint()
-        ..color = const Color(0xFF1A3A5C)
+        ..color = const Color(0xFF0288D1)
         ..style = PaintingStyle.fill,
     );
     canvas.drawCircle(
@@ -256,7 +257,7 @@ class _KasaLogoPainter extends CustomPainter {
       text: const TextSpan(
         text: '₺',
         style: TextStyle(
-          color: Color(0xFF1A3A5C),
+          color: Color(0xFF0288D1),
           fontSize: 13,
           fontWeight: FontWeight.bold,
         ),
@@ -269,7 +270,7 @@ class _KasaLogoPainter extends CustomPainter {
       text: const TextSpan(
         text: '\$',
         style: TextStyle(
-          color: Color(0xFF1A3A5C),
+          color: Color(0xFF0288D1),
           fontSize: 11,
           fontWeight: FontWeight.bold,
         ),
@@ -469,8 +470,15 @@ class _GirisEkraniState extends State<GirisEkrani> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1A3A5C),
-      body: Center(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
           child: Column(
@@ -559,7 +567,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
                                   _parolaCtrl.text,
                                 ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1A3A5C),
+                            backgroundColor: const Color(0xFF0288D1),
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -589,12 +597,13 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.1',
+                'v1.0.2',
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -629,8 +638,17 @@ class SubeSecimEkrani extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1A3A5C),
+      backgroundColor: const Color(0xFF0288D1),
       appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
         title: const Text('Şube Seçin'),
         centerTitle: true,
         actions: [
@@ -701,7 +719,7 @@ class SubeSecimEkrani extends StatelessWidget {
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF1A3A5C),
+                          foregroundColor: const Color(0xFF0288D1),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -783,7 +801,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A3A5C),
+              backgroundColor: const Color(0xFF0288D1),
               foregroundColor: Colors.white,
             ),
             child: const Text('Devam Et'),
@@ -857,6 +875,15 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
       length: tabs.length,
       child: Scaffold(
         appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
           title: Text('${y.rolAdi ?? 'Yönetici'} Paneli'),
           centerTitle: true,
           actions: [
@@ -895,7 +922,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
               icon: const Icon(Icons.add_business),
               label: const Text('Yeni Şube Ekle'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A3A5C),
+                backgroundColor: const Color(0xFF0288D1),
                 foregroundColor: Colors.white,
               ),
             ),
@@ -908,7 +935,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: aktif
-                        ? const Color(0xFF1A3A5C)
+                        ? const Color(0xFF0288D1)
                         : Colors.grey,
                     child: const Icon(
                       Icons.store,
@@ -933,13 +960,13 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                       ),
                       // Düzenle
                       IconButton(
-                        icon: const Icon(Icons.edit, color: Color(0xFF1A3A5C)),
+                        icon: const Icon(Icons.edit, color: Color(0xFF0288D1)),
                         tooltip: 'Şube Adını Düzenle',
                         onPressed: () => _subeDuzenleDialog(s.id, ad),
                       ),
                       // Gir
                       IconButton(
-                        icon: const Icon(Icons.login, color: Color(0xFF1A3A5C)),
+                        icon: const Icon(Icons.login, color: Color(0xFF0288D1)),
                         tooltip: 'Şubeye Gir',
                         onPressed: () async {
                           final tumSubeler = await FirebaseFirestore.instance
@@ -1009,7 +1036,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
               if (mounted) Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A3A5C),
+              backgroundColor: const Color(0xFF0288D1),
               foregroundColor: Colors.white,
             ),
             child: const Text('Kaydet'),
@@ -1055,7 +1082,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
               if (mounted) Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A3A5C),
+              backgroundColor: const Color(0xFF0288D1),
               foregroundColor: Colors.white,
             ),
             child: const Text('Ekle'),
@@ -1256,7 +1283,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                   icon: const Icon(Icons.person_add),
                   label: const Text('Yeni Kullanıcı Ekle'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1A3A5C),
+                    backgroundColor: const Color(0xFF0288D1),
                     foregroundColor: Colors.white,
                   ),
                 ),
@@ -1281,7 +1308,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                     child: ListTile(
                       leading: CircleAvatar(
                         backgroundColor: aktif
-                            ? const Color(0xFF1A3A5C)
+                            ? const Color(0xFF0288D1)
                             : Colors.grey,
                         child: Text(
                           k.id[0].toUpperCase(),
@@ -1326,7 +1353,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                               ),
                               decoration: BoxDecoration(
                                 color: const Color(
-                                  0xFF1A3A5C,
+                                  0xFF0288D1,
                                 ).withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(4),
                               ),
@@ -1335,7 +1362,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                                 style: const TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1A3A5C),
+                                  color: Color(0xFF0288D1),
                                 ),
                               ),
                             ),
@@ -1381,7 +1408,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                               children: [
                                 Icon(
                                   Icons.edit,
-                                  color: Color(0xFF1A3A5C),
+                                  color: Color(0xFF0288D1),
                                   size: 18,
                                 ),
                                 SizedBox(width: 8),
@@ -1554,7 +1581,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                 if (ctx.mounted) Navigator.pop(ctx);
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A3A5C),
+                backgroundColor: const Color(0xFF0288D1),
                 foregroundColor: Colors.white,
               ),
               child: const Text('Ekle'),
@@ -1576,7 +1603,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
       child: Column(
         children: [
           Container(
-            color: const Color(0xFF1A3A5C),
+            color: const Color(0xFF0288D1),
             child: const TabBar(
               labelColor: Colors.white,
               unselectedLabelColor: Colors.white60,
@@ -1654,7 +1681,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                         max: 30,
                         divisions: 30,
                         label: '$gecmisGunHakki gün',
-                        activeColor: const Color(0xFF1A3A5C),
+                        activeColor: const Color(0xFF0288D1),
                         onChanged: (v) =>
                             setS(() => gecmisGunHakki = v.toInt()),
                       ),
@@ -1677,7 +1704,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                     ),
                     subtitle: const Text('Raporlar ekranına erişim'),
                     value: raporYetkisi,
-                    activeColor: const Color(0xFF1A3A5C),
+                    activeColor: const Color(0xFF0288D1),
                     onChanged: (v) => setS(() => raporYetkisi = v),
                   ),
                 ),
@@ -1779,7 +1806,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                 if (mounted) Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A3A5C),
+                backgroundColor: const Color(0xFF0288D1),
                 foregroundColor: Colors.white,
               ),
               child: const Text('Kaydet'),
@@ -1806,7 +1833,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
               icon: const Icon(Icons.add),
               label: const Text('Yeni Rol Ekle'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A3A5C),
+                backgroundColor: const Color(0xFF0288D1),
                 foregroundColor: Colors.white,
               ),
             ),
@@ -1833,7 +1860,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
               return Card(
                 child: ListTile(
                   leading: const CircleAvatar(
-                    backgroundColor: Color(0xFF1A3A5C),
+                    backgroundColor: Color(0xFF0288D1),
                     child: Icon(Icons.badge, color: Colors.white, size: 18),
                   ),
                   title: Text(
@@ -1871,7 +1898,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                         icon: const Icon(
                           Icons.edit,
                           size: 18,
-                          color: Color(0xFF1A3A5C),
+                          color: Color(0xFF0288D1),
                         ),
                         onPressed: () => _rolDuzenleDialog(r.id, data),
                       ),
@@ -1980,11 +2007,11 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                         secondary: Icon(
                           t.$3,
                           size: 18,
-                          color: const Color(0xFF1A3A5C),
+                          color: const Color(0xFF0288D1),
                         ),
                         title: Text(t.$2, style: const TextStyle(fontSize: 13)),
                         value: y[t.$1] == true,
-                        activeColor: const Color(0xFF1A3A5C),
+                        activeColor: const Color(0xFF0288D1),
                         onChanged: (v) => setS(() => y[t.$1] = v),
                       ),
                     ),
@@ -2009,7 +2036,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                           ),
                           Switch(
                             value: y['gecmisGunHakki'] == -1,
-                            activeColor: const Color(0xFF1A3A5C),
+                            activeColor: const Color(0xFF0288D1),
                             onChanged: (v) =>
                                 setS(() => y['gecmisGunHakki'] = v ? -1 : 3),
                           ),
@@ -2030,7 +2057,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                           max: 30,
                           divisions: 30,
                           label: '${y['gecmisGunHakki']} gün',
-                          activeColor: const Color(0xFF1A3A5C),
+                          activeColor: const Color(0xFF0288D1),
                           onChanged: (v) =>
                               setS(() => y['gecmisGunHakki'] = v.toInt()),
                         ),
@@ -2058,7 +2085,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                 if (ctx.mounted) Navigator.pop(ctx);
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A3A5C),
+                backgroundColor: const Color(0xFF0288D1),
                 foregroundColor: Colors.white,
               ),
               child: const Text('Kaydet'),
@@ -2139,7 +2166,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF1A3A5C),
+                  color: Color(0xFF0288D1),
                 ),
               ),
               const SizedBox(height: 4),
@@ -2180,9 +2207,9 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                             label: Text('$b ₺'),
                             selected: secili,
                             selectedColor: const Color(
-                              0xFF1A3A5C,
+                              0xFF0288D1,
                             ).withOpacity(0.15),
-                            checkmarkColor: const Color(0xFF1A3A5C),
+                            checkmarkColor: const Color(0xFF0288D1),
                             onSelected: (v) async {
                               final yeni = List<int>.from(mevcutBanknotlar);
                               if (v) {
@@ -2238,11 +2265,11 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                                       ),
                                     ),
                                     backgroundColor: const Color(
-                                      0xFF1A3A5C,
+                                      0xFF0288D1,
                                     ).withOpacity(0.08),
                                     side: BorderSide(
                                       color: const Color(
-                                        0xFF1A3A5C,
+                                        0xFF0288D1,
                                       ).withOpacity(0.3),
                                     ),
                                     deleteIcon: const Icon(
@@ -2321,7 +2348,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                                 icon: const Icon(Icons.add, size: 18),
                                 label: const Text('Ekle'),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF1A3A5C),
+                                  backgroundColor: const Color(0xFF0288D1),
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -2370,7 +2397,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                             label: Text('$b ₺ ve altı'),
                             selected: secili,
                             selectedColor: const Color(
-                              0xFF1A3A5C,
+                              0xFF0288D1,
                             ).withOpacity(0.15),
                             onSelected: (_) async {
                               await FirebaseFirestore.instance
@@ -2430,7 +2457,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                                   const Icon(
                                     Icons.percent,
                                     size: 18,
-                                    color: Color(0xFF1A3A5C),
+                                    color: Color(0xFF0288D1),
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
@@ -2456,7 +2483,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                                 max: 25,
                                 divisions: 24,
                                 label: '%${seciliOran.toStringAsFixed(0)}',
-                                activeColor: const Color(0xFF1A3A5C),
+                                activeColor: const Color(0xFF0288D1),
                                 onChanged: (v) => setKdv(() => seciliOran = v),
                                 onChangeEnd: (v) async {
                                   await FirebaseFirestore.instance
@@ -2493,7 +2520,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
           child: Column(
             children: [
               Container(
-                color: const Color(0xFF1A3A5C),
+                color: const Color(0xFF0288D1),
                 child: const TabBar(
                   labelColor: Colors.white,
                   unselectedLabelColor: Colors.white60,
@@ -3047,7 +3074,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A3A5C),
+                backgroundColor: const Color(0xFF0288D1),
                 foregroundColor: Colors.white,
               ),
               child: const Text('Devam Et'),
@@ -3517,7 +3544,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           ElevatedButton(
             onPressed: () => Navigator.pop(context),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A3A5C),
+              backgroundColor: const Color(0xFF0288D1),
               foregroundColor: Colors.white,
             ),
             child: const Text('Tamam'),
@@ -3574,7 +3601,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 icon: const Icon(Icons.lock_clock, size: 16),
                 label: const Text('Günü Kapat'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1A3A5C),
+                  backgroundColor: const Color(0xFF0288D1),
                   foregroundColor: Colors.white,
                 ),
               )
@@ -3694,7 +3721,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               ElevatedButton(
                 onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1A3A5C),
+                  backgroundColor: const Color(0xFF0288D1),
                   foregroundColor: Colors.white,
                 ),
                 child: const Text('Tamam'),
@@ -4072,7 +4099,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 20,
-                          color: Color(0xFF1A3A5C),
+                          color: Color(0xFF0288D1),
                         ),
                       ),
                       if (aciklama.isNotEmpty) ...[
@@ -4260,7 +4287,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 20,
-                          color: Color(0xFF1A3A5C),
+                          color: Color(0xFF0288D1),
                         ),
                       ),
                       if (aciklama.isNotEmpty) ...[
@@ -4797,11 +4824,32 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           _dovizBankayaYatiranCtrl[t]!.text = _sifirTemizle(dovizBanka?[t]);
         }
       }
-      // Döviz devreden = o günün kaydındaki oncekiDovizAnaKasaKalanlari
-      // TL mantığıyla aynı: alan varsa kullan, yoksa 0
+      // Döviz devreden = o günün kaydındaki oncekiDovizKalanlari
+      // (bir önceki günün dovizAnaKasaKalanlari)
       final oncekiDovizKalanlar = data['oncekiDovizAnaKasaKalanlari'] as Map?;
+      final dovizKalanlar = data['dovizAnaKasaKalanlari'] as Map?;
       for (var t in _dovizTurleri) {
-        _devredenDovizMiktarlari[t] = (oncekiDovizKalanlar?[t] ?? 0).toDouble();
+        if (oncekiDovizKalanlar != null) {
+          _devredenDovizMiktarlari[t] = (oncekiDovizKalanlar[t] ?? 0)
+              .toDouble();
+        } else if (dovizKalanlar != null && dovizKalanlar[t] != null) {
+          final bugunMiktar = _dovizler
+              .where((d) => d['cins'] == t)
+              .fold(
+                0.0,
+                (sum, d) =>
+                    sum +
+                    (_parseDouble(
+                      (d['miktarCtrl'] as TextEditingController).text,
+                    )),
+              );
+          // Negatif çıkmasını önle — eski format kayıtlarda tutarsızlık olabilir
+          final hesap =
+              ((dovizKalanlar[t] ?? 0) as num).toDouble() - bugunMiktar;
+          _devredenDovizMiktarlari[t] = hesap < 0 ? 0 : hesap;
+        } else {
+          _devredenDovizMiktarlari[t] = 0;
+        }
       }
 
       // Transferler
@@ -5762,7 +5810,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       : Icons.arrow_downward,
                                   color: isGiden
                                       ? Colors.red
-                                      : const Color(0xFF1A3A5C),
+                                      : const Color(0xFF0288D1),
                                   size: 14,
                                 ),
                                 const SizedBox(width: 4),
@@ -5784,7 +5832,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       fontWeight: FontWeight.bold,
                                       color: isGiden
                                           ? Colors.red[800]
-                                          : const Color(0xFF1A3A5C),
+                                          : const Color(0xFF0288D1),
                                     ),
                                   ),
                                 ),
@@ -5846,7 +5894,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF1A3A5C),
+                                      backgroundColor: const Color(0xFF0288D1),
                                       foregroundColor: Colors.white,
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 6,
@@ -6038,7 +6086,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             builder: (_) => AlertDialog(
               title: const Row(
                 children: [
-                  Icon(Icons.calendar_today, color: Color(0xFF1A3A5C)),
+                  Icon(Icons.calendar_today, color: Color(0xFF0288D1)),
                   SizedBox(width: 8),
                   Text('Kapanmamış Gün'),
                 ],
@@ -6055,7 +6103,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 ElevatedButton(
                   onPressed: () => Navigator.pop(context, true),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1A3A5C),
+                    backgroundColor: const Color(0xFF0288D1),
                     foregroundColor: Colors.white,
                   ),
                   child: const Text('Geç'),
@@ -6384,14 +6432,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Icon(icon, color: const Color(0xFF1A3A5C), size: 20),
+          Icon(icon, color: const Color(0xFF0288D1), size: 20),
           const SizedBox(width: 8),
           Text(
             title,
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1A3A5C),
+              color: Color(0xFF0288D1),
             ),
           ),
         ],
@@ -6427,14 +6475,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Icon(icon, color: const Color(0xFF1A3A5C), size: 20),
+          Icon(icon, color: const Color(0xFF0288D1), size: 20),
           const SizedBox(width: 8),
           Text(
             title,
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1A3A5C),
+              color: Color(0xFF0288D1),
             ),
           ),
           const SizedBox(width: 6),
@@ -6467,14 +6515,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         children: [
           Row(
             children: [
-              Icon(icon, color: const Color(0xFF1A3A5C), size: 20),
+              Icon(icon, color: const Color(0xFF0288D1), size: 20),
               const SizedBox(width: 8),
               Text(
                 title,
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF1A3A5C),
+                  color: Color(0xFF0288D1),
                 ),
               ),
             ],
@@ -6779,7 +6827,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF1A3A5C).withOpacity(0.07),
+                color: const Color(0xFF0288D1).withOpacity(0.07),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -6790,7 +6838,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
-                      color: Color(0xFF1A3A5C),
+                      color: Color(0xFF0288D1),
                     ),
                   ),
                   Text(
@@ -6798,7 +6846,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      color: Color(0xFF1A3A5C),
+                      color: Color(0xFF0288D1),
                     ),
                   ),
                 ],
@@ -6808,9 +6856,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             // Sistemdeki POS — zorunlu, belirgin
             Container(
               decoration: BoxDecoration(
-                color: const Color(0xFF1A3A5C).withOpacity(0.07),
+                color: const Color(0xFF0288D1).withOpacity(0.07),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF1A3A5C), width: 1.5),
+                border: Border.all(color: const Color(0xFF0288D1), width: 1.5),
               ),
               child: TextFormField(
                 controller: _sistemPosCtrl,
@@ -6823,10 +6871,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   hintText: 'Mutlaka girilmeli!',
                   prefixIcon: const Icon(
                     Icons.point_of_sale,
-                    color: Color(0xFF1A3A5C),
+                    color: Color(0xFF0288D1),
                   ),
                   labelStyle: const TextStyle(
-                    color: Color(0xFF1A3A5C),
+                    color: Color(0xFF0288D1),
                     fontWeight: FontWeight.bold,
                   ),
                   border: InputBorder.none,
@@ -7099,7 +7147,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               children: [
                 TableRow(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1A3A5C).withOpacity(0.1),
+                    color: const Color(0xFF0288D1).withOpacity(0.1),
                   ),
                   children: const [
                     Padding(
@@ -7667,10 +7715,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: const Color(0xFF1A3A5C).withOpacity(0.07),
+                color: const Color(0xFF0288D1).withOpacity(0.07),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: const Color(0xFF1A3A5C).withOpacity(0.2),
+                  color: const Color(0xFF0288D1).withOpacity(0.2),
                 ),
               ),
               child: Row(
@@ -7680,7 +7728,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     children: [
                       Icon(
                         Icons.calculate_outlined,
-                        color: Color(0xFF1A3A5C),
+                        color: Color(0xFF0288D1),
                         size: 18,
                       ),
                       SizedBox(width: 8),
@@ -7688,7 +7736,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         'Kasada Olması Gereken',
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFF1A3A5C),
+                          color: Color(0xFF0288D1),
                         ),
                       ),
                     ],
@@ -7698,7 +7746,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      color: Color(0xFF1A3A5C),
+                      color: Color(0xFF0288D1),
                     ),
                   ),
                 ],
@@ -7880,7 +7928,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               // Renk: GİDEN = kırmızı, GELEN = mavi
               final Color renk = kategori == 'GİDEN'
                   ? Colors.red[700]!
-                  : const Color(0xFF1A3A5C);
+                  : const Color(0xFF0288D1);
 
               // Durum badge rengi ve metni (GİDEN ve GELEN için)
               Color durumRenk = Colors.grey[400]!;
@@ -7971,14 +8019,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     const Text(
                       'Toplam Gelen',
                       style: TextStyle(
-                        color: Color(0xFF1A3A5C),
+                        color: Color(0xFF0288D1),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     Text(
                       '+ ${_formatTL(toplamGelen)}',
                       style: const TextStyle(
-                        color: Color(0xFF1A3A5C),
+                        color: Color(0xFF0288D1),
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -7993,7 +8041,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   ),
                   decoration: BoxDecoration(
                     color: netTransfer >= 0
-                        ? const Color(0xFF1A3A5C).withOpacity(0.1)
+                        ? const Color(0xFF0288D1).withOpacity(0.1)
                         : Colors.red[50],
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -8009,7 +8057,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: netTransfer >= 0
-                              ? const Color(0xFF1A3A5C)
+                              ? const Color(0xFF0288D1)
                               : Colors.red[700],
                         ),
                       ),
@@ -8189,7 +8237,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         final hazir =
                             hedef.isNotEmpty && hedef != 'diger' && tutar0 > 0;
                         return hazir
-                            ? const Color(0xFF1A3A5C)
+                            ? const Color(0xFF0288D1)
                             : Colors.grey[400];
                       }(),
                 foregroundColor: Colors.white,
@@ -8245,7 +8293,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           (t['tutarCtrl'] as TextEditingController).text,
                         );
                         return kaynak.isNotEmpty && tutar0 > 0
-                            ? const Color(0xFF1A3A5C)
+                            ? const Color(0xFF0288D1)
                             : Colors.grey[400];
                       }(),
                 foregroundColor: Colors.white,
@@ -8452,7 +8500,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           ElevatedButton(
                             onPressed: () => Navigator.pop(context, 'kaydet'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1A3A5C),
+                              backgroundColor: const Color(0xFF0288D1),
                               foregroundColor: Colors.white,
                             ),
                             child: const Text('Kaydet'),
@@ -8477,7 +8525,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 icon: const Icon(Icons.check, size: 16),
                 label: const Text('Kaydet', style: TextStyle(fontSize: 12)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1A3A5C),
+                  backgroundColor: const Color(0xFF0288D1),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   shape: RoundedRectangleBorder(
@@ -8555,12 +8603,12 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             ListTile(
               leading: const Icon(
                 Icons.arrow_downward,
-                color: Color(0xFF1A3A5C),
+                color: Color(0xFF0288D1),
               ),
               title: const Text(
                 'GELEN',
                 style: TextStyle(
-                  color: Color(0xFF1A3A5C),
+                  color: Color(0xFF0288D1),
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -9314,7 +9362,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 suffixText: '₺',
                 prefixIcon: Icon(
                   Icons.account_balance,
-                  color: Color(0xFF1A3A5C),
+                  color: Color(0xFF0288D1),
                 ),
               ),
               keyboardType: const TextInputType.numberWithOptions(
@@ -9659,7 +9707,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             const Divider(),
 
             // Toplam Ana Kasa Kalanı
-            _altBaslik('Toplam Ana Kasa Kalanı', const Color(0xFF1A3A5C)),
+            _altBaslik('Toplam Ana Kasa Kalanı', const Color(0xFF0288D1)),
             Container(
               margin: const EdgeInsets.only(top: 4, bottom: 4),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -9815,10 +9863,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1A3A5C).withOpacity(0.04),
+                  color: const Color(0xFF0288D1).withOpacity(0.04),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: const Color(0xFF1A3A5C).withOpacity(0.15),
+                    color: const Color(0xFF0288D1).withOpacity(0.15),
                   ),
                 ),
                 child: Column(
@@ -9831,7 +9879,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 15,
-                            color: Color(0xFF1A3A5C),
+                            color: Color(0xFF0288D1),
                           ),
                         ),
                       ],
@@ -9940,7 +9988,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     // İlk yükleme sırasında splash göster
     if (_banknotCtrl.isEmpty) {
       return Scaffold(
-        backgroundColor: const Color(0xFF1A3A5C),
+        backgroundColor: const Color(0xFF0288D1),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -9976,10 +10024,19 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       },
       child: Scaffold(
         appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
           title: widget.subeler.length > 1
               ? DropdownButton<String>(
                   value: widget.subeKodu,
-                  dropdownColor: const Color(0xFF1A3A5C),
+                  dropdownColor: const Color(0xFF0288D1),
                   underline: const SizedBox(),
                   icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
                   style: const TextStyle(
@@ -10181,7 +10238,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   value: 'gecmis',
                   child: Row(
                     children: [
-                      Icon(Icons.history, color: Color(0xFF1A3A5C)),
+                      Icon(Icons.history, color: Color(0xFF0288D1)),
                       SizedBox(width: 12),
                       Text('Geçmiş Kayıtlar'),
                     ],
@@ -10723,46 +10780,57 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                 SizedBox(
                                   width: double.infinity,
                                   height: 52,
-                                  child: ElevatedButton.icon(
-                                    onPressed:
-                                        (_kaydetButonuAktif &&
-                                            _kilitTutanKullanici == null)
-                                        ? _kaydet
-                                        : null,
-                                    icon: _kaydediliyor
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                              color: Colors.white,
-                                              strokeWidth: 2,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: (_kaydetButonuAktif && _kilitTutanKullanici == null)
+                                          ? const LinearGradient(
+                                              colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+                                              begin: Alignment.centerLeft,
+                                              end: Alignment.centerRight,
+                                            )
+                                          : const LinearGradient(
+                                              colors: [Colors.grey, Colors.grey],
                                             ),
-                                          )
-                                        : Icon(
-                                            !_internetVar
-                                                ? Icons.wifi_off
-                                                : Icons.lock_clock,
-                                          ),
-                                    label: Text(
-                                      _kaydediliyor
-                                          ? 'Kaydediliyor...'
-                                          : !_internetVar
-                                          ? 'Bağlantı Yok'
-                                          : 'Günü Kapat',
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor:
+                                    child: ElevatedButton.icon(
+                                      onPressed:
                                           (_kaydetButonuAktif &&
                                               _kilitTutanKullanici == null)
-                                          ? const Color(0xFF1A3A5C)
-                                          : Colors.grey,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
+                                          ? _kaydet
+                                          : null,
+                                      icon: _kaydediliyor
+                                          ? const SizedBox(
+                                              width: 20,
+                                              height: 20,
+                                              child: CircularProgressIndicator(
+                                                color: Colors.white,
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : Icon(
+                                              !_internetVar
+                                                  ? Icons.wifi_off
+                                                  : Icons.lock_clock,
+                                            ),
+                                      label: Text(
+                                        _kaydediliyor
+                                            ? 'Kaydediliyor...'
+                                            : !_internetVar
+                                            ? 'Bağlantı Yok'
+                                            : 'Günü Kapat',
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.transparent,
+                                        shadowColor: Colors.transparent,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -10900,7 +10968,7 @@ class _GiderDuzenleSheetState extends State<_GiderDuzenleSheet> {
       style: const TextStyle(
         fontWeight: FontWeight.bold,
         fontSize: 13,
-        color: Color(0xFF1A3A5C),
+        color: Color(0xFF0288D1),
       ),
     ),
   );
@@ -11128,7 +11196,7 @@ class _GiderDuzenleSheetState extends State<_GiderDuzenleSheet> {
                   ElevatedButton(
                     onPressed: _kaydediliyor ? null : _kaydet,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A3A5C),
+                      backgroundColor: const Color(0xFF0288D1),
                       foregroundColor: Colors.white,
                     ),
                     child: _kaydediliyor
@@ -11176,7 +11244,7 @@ class _GiderDuzenleSheetState extends State<_GiderDuzenleSheet> {
                         style: TextStyle(fontSize: 13),
                       ),
                       style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF1A3A5C),
+                        foregroundColor: const Color(0xFF0288D1),
                       ),
                     ),
                     // ── Personel ─────────────────────────────
@@ -11251,7 +11319,7 @@ class _GiderDuzenleSheetState extends State<_GiderDuzenleSheet> {
                         style: TextStyle(fontSize: 13),
                       ),
                       style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF1A3A5C),
+                        foregroundColor: const Color(0xFF0288D1),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -11412,7 +11480,7 @@ class _EkGiderSheetState extends State<_EkGiderSheet> {
                   ElevatedButton(
                     onPressed: _kaydediliyor ? null : _kaydet,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A3A5C),
+                      backgroundColor: const Color(0xFF0288D1),
                       foregroundColor: Colors.white,
                     ),
                     child: _kaydediliyor
@@ -11482,8 +11550,8 @@ class _EkGiderSheetState extends State<_EkGiderSheet> {
                         icon: const Icon(Icons.add, size: 18),
                         label: const Text('Özel Gider Ekle'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1A3A5C),
-                          side: const BorderSide(color: Color(0xFF1A3A5C)),
+                          foregroundColor: const Color(0xFF0288D1),
+                          side: const BorderSide(color: Color(0xFF0288D1)),
                         ),
                       ),
                     );
@@ -11991,7 +12059,7 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               decoration: const BoxDecoration(
-                color: Color(0xFF1A3A5C),
+                color: Color(0xFF0288D1),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
               ),
               child: Row(
@@ -12062,7 +12130,7 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  _satirKalem('Ciro', ciro, const Color(0xFF1A3A5C)),
+                  _satirKalem('Ciro', ciro, const Color(0xFF0288D1)),
                   _satirKalem(
                     'Kasadan Harcamalar',
                     -harcama,
@@ -12163,7 +12231,7 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
                     style: TextStyle(fontSize: 12),
                   ),
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF1A3A5C),
+                    foregroundColor: const Color(0xFF0288D1),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
                       vertical: 6,
@@ -12252,7 +12320,7 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
-      color: const Color(0xFF1A3A5C),
+      color: const Color(0xFF0288D1),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -12476,7 +12544,7 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Önceki Dönemle Karşılaştır'),
                     value: _karsilastirmaAcik,
-                    activeColor: const Color(0xFF1A3A5C),
+                    activeColor: const Color(0xFF0288D1),
                     onChanged: (v) {
                       setState(() {
                         _karsilastirmaAcik = v;
@@ -12609,7 +12677,7 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
                       icon: const Icon(Icons.search, size: 18),
                       label: const Text('Göster'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1A3A5C),
+                        backgroundColor: const Color(0xFF0288D1),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
@@ -12631,7 +12699,7 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF1A3A5C),
+                color: Color(0xFF0288D1),
               ),
             ),
             const SizedBox(height: 12),
@@ -12812,7 +12880,7 @@ class _GiderAdiAlaniState extends State<_GiderAdiAlani> {
                             secili ? Icons.check_circle : Icons.label_outline,
                             size: 18,
                             color: secili
-                                ? const Color(0xFF1A3A5C)
+                                ? const Color(0xFF0288D1)
                                 : Colors.grey,
                           ),
                           title: Text(
@@ -12987,7 +13055,7 @@ class _GiderTurleriKartState extends State<_GiderTurleriKart> {
                           const Icon(
                             Icons.label_outline,
                             size: 16,
-                            color: Color(0xFF1A3A5C),
+                            color: Color(0xFF0288D1),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -13072,7 +13140,7 @@ class _GiderTurleriKartState extends State<_GiderTurleriKart> {
                             icon: const Icon(Icons.add, size: 18),
                             label: const Text('Ekle'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1A3A5C),
+                              backgroundColor: const Color(0xFF0288D1),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -13467,7 +13535,7 @@ class _ProjeksiyonWidgetState extends State<_ProjeksiyonWidget>
       style: const TextStyle(
         fontWeight: FontWeight.bold,
         fontSize: 13,
-        color: Color(0xFF1A3A5C),
+        color: Color(0xFF0288D1),
       ),
     ),
   );
@@ -13612,7 +13680,7 @@ class _ProjeksiyonWidgetState extends State<_ProjeksiyonWidget>
                   ElevatedButton(
                     onPressed: _yukle,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A3A5C),
+                      backgroundColor: const Color(0xFF0288D1),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -13637,7 +13705,7 @@ class _ProjeksiyonWidgetState extends State<_ProjeksiyonWidget>
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1A3A5C),
+              color: Color(0xFF0288D1),
             ),
           ),
           const SizedBox(height: 12),
@@ -13645,7 +13713,7 @@ class _ProjeksiyonWidgetState extends State<_ProjeksiyonWidget>
           // ── Genel toplam kartı (lacivert) ──
           if (_subeVeriler.isNotEmpty) ...[
             Card(
-              color: const Color(0xFF1A3A5C),
+              color: const Color(0xFF0288D1),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -13746,7 +13814,7 @@ class _ProjeksiyonWidgetState extends State<_ProjeksiyonWidget>
   );
 
   Widget _ozetKart(String etiket, double deger, bool? pozitif) {
-    Color renk = const Color(0xFF1A3A5C);
+    Color renk = const Color(0xFF0288D1);
     if (pozitif == true) renk = Colors.green[700]!;
     if (pozitif == false) renk = Colors.red[700]!;
     return Expanded(
@@ -13824,7 +13892,7 @@ class _ProjeksiyonWidgetState extends State<_ProjeksiyonWidget>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               decoration: const BoxDecoration(
-                color: Color(0xFF1A3A5C),
+                color: Color(0xFF0288D1),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
               ),
               child: Row(
@@ -14101,7 +14169,7 @@ class _ProjeksiyonWidgetState extends State<_ProjeksiyonWidget>
                     style: TextStyle(fontSize: 12),
                   ),
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF1A3A5C),
+                    foregroundColor: const Color(0xFF0288D1),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
                       vertical: 6,
@@ -14359,10 +14427,19 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
 
     return Scaffold(
       appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
         title: widget.subeler.length > 1
             ? DropdownButton<String>(
                 value: _aktifSubeKodu,
-                dropdownColor: const Color(0xFF1A3A5C),
+                dropdownColor: const Color(0xFF0288D1),
                 underline: const SizedBox(),
                 icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
                 style: const TextStyle(
@@ -14398,7 +14475,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(36),
           child: Container(
-            color: const Color(0xFF1A3A5C),
+            color: const Color(0xFF0288D1),
             padding: const EdgeInsets.only(bottom: 4),
             child: yonetici
                 ? Row(
@@ -14659,7 +14736,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                 margin: const EdgeInsets.only(bottom: 10),
                 child: ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: const Color(0xFF1A3A5C),
+                    backgroundColor: const Color(0xFF0288D1),
                     child: Text(
                       tarihGoster.split('.').first,
                       style: const TextStyle(
@@ -14932,7 +15009,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                   ),
                   trailing: const Icon(
                     Icons.chevron_right,
-                    color: Color(0xFF1A3A5C),
+                    color: Color(0xFF0288D1),
                   ),
                   isThreeLine: true,
                   onTap: () {
@@ -14998,8 +15075,17 @@ class RaporlarEkrani extends StatelessWidget {
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F7FA),
         appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
           title: const Text('Raporlar'),
-          backgroundColor: const Color(0xFF1A3A5C),
+          backgroundColor: const Color(0xFF0288D1),
           foregroundColor: Colors.white,
           bottom: const TabBar(
             labelColor: Colors.white,
@@ -15439,7 +15525,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
             child: Column(
               children: [
                 _satirOzet('Satış Toplamı', satis, Colors.red[700]!),
-                _satirOzet('Toplam POS', pos, const Color(0xFF1A3A5C)),
+                _satirOzet('Toplam POS', pos, const Color(0xFF0288D1)),
                 // Detaylar akordeon butonu
                 if (onDetayToggle != null)
                   InkWell(
@@ -15900,7 +15986,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
     Widget _sagBaslik() => Container(
       height: baslikH,
       padding: const EdgeInsets.only(right: 8),
-      color: const Color(0xFF1A3A5C),
+      color: const Color(0xFF0288D1),
       child: Row(
         children: [
           for (final col in [
@@ -15983,7 +16069,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
                   height: baslikH,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1A3A5C),
+                    color: Color(0xFF0288D1),
                     borderRadius: BorderRadius.only(
                       topLeft: Radius.circular(14),
                     ),
@@ -16385,7 +16471,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Önceki Dönemle Karşılaştır'),
                     value: _karsilastirmaAcik,
-                    activeColor: const Color(0xFF1A3A5C),
+                    activeColor: const Color(0xFF0288D1),
                     onChanged: (v) => setState(() => _karsilastirmaAcik = v),
                   ),
                   if (_karsilastirmaAcik) ...[
@@ -16500,7 +16586,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
                           : const Icon(Icons.search),
                       label: const Text('Raporu Getir'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1A3A5C),
+                        backgroundColor: const Color(0xFF0288D1),
                         foregroundColor: Colors.white,
                       ),
                     ),
@@ -16535,7 +16621,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
                       _filtreModu == 'ay'
                           ? '${_aylar[_secilenAy - 1]} $_secilenYil'
                           : 'Seçili Dönem',
-                      const Color(0xFF1A3A5C),
+                      const Color(0xFF0288D1),
                       gerceklesenGiderler: _gerceklesenGiderler,
                       detayAcik: _ozetDetayAcik,
                       onDetayToggle: () =>
@@ -16551,7 +16637,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
                 _filtreModu == 'ay'
                     ? '${_aylar[_secilenAy - 1]} $_secilenYil'
                     : 'Seçili Dönem',
-                const Color(0xFF1A3A5C),
+                const Color(0xFF0288D1),
                 gerceklesenGiderler: _gerceklesenGiderler,
                 detayAcik: _ozetDetayAcik,
                 onDetayToggle: () =>
@@ -16575,7 +16661,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
                   icon: Icon(
                     _siralamaArtan ? Icons.arrow_upward : Icons.arrow_downward,
                     size: 18,
-                    color: const Color(0xFF1A3A5C),
+                    color: const Color(0xFF0288D1),
                   ),
                   tooltip: _siralamaArtan
                       ? 'Yeniden Eskiye Sırala'
@@ -16611,7 +16697,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
-                color: Color(0xFF1A3A5C),
+                color: Color(0xFF0288D1),
               ),
             ),
             const SizedBox(height: 10),
@@ -16777,7 +16863,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1A3A5C),
+            color: const Color(0xFF0288D1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -17056,10 +17142,10 @@ class _OzetEkraniState extends State<OzetEkrani> {
       // Her grup için başlık + renk tanımı
       // [kolon adı, grup rengi hex]
       final List<Map<String, String>> kolonlar = [
-        {'ad': 'Tarih', 'renk': '#1A3A5C'},
+        {'ad': 'Tarih', 'renk': '#0288D1'},
         {'ad': 'Devreden Flot', 'renk': '#2E7D32'},
         {'ad': 'Ekranda Görünen Nakit', 'renk': '#F57F17'},
-        {'ad': 'Toplam POS', 'renk': '#1A3A5C'},
+        {'ad': 'Toplam POS', 'renk': '#0288D1'},
         {'ad': 'Günlük Satış Toplamı', 'renk': '#C62828'},
         {'ad': 'Toplam Harcama', 'renk': '#C62828'},
         {'ad': 'Günlük Flot', 'renk': '#2E7D32'},
@@ -18276,6 +18362,15 @@ class _OzetEkraniState extends State<OzetEkrani> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF01579B), Color(0xFF0288D1), Color(0xFF29B6F6)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
         title: widget.subeler.length > 1
             ? DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
@@ -18551,7 +18646,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
           ),
         // POS Toplamı - sadece toplam
         _bolum(
-          renk: const Color(0xFF1A3A5C),
+          renk: const Color(0xFF0288D1),
           ikon: Icons.credit_card,
           baslik: 'POS TOPLAMI',
           toplam: _fmt(toplamPos),
@@ -18589,7 +18684,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
               _kalemSatiriBold(
                 'Ekranda Görünen Nakit',
                 _fmt(_toDouble(d['ekrandaGorunenNakit'])),
-                renk: const Color(0xFF1A3A5C),
+                renk: const Color(0xFF0288D1),
               ),
               _kalemSatiri('Devreden Flot', _fmt(devredenFlot)),
               _kalemSatiri('Günün Flotu', _fmt(flotTutari)),
@@ -18920,7 +19015,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
                     const Text(
                       'GELEN',
                       style: TextStyle(
-                        color: Color(0xFF1A3A5C),
+                        color: Color(0xFF0288D1),
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
                       ),
@@ -18949,7 +19044,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
                       return _kalemSatiriRenk(
                         label.isEmpty ? 'Transfer' : label,
                         '+ ${_fmt(_toDouble(t['tutar']))}',
-                        const Color(0xFF1A3A5C),
+                        const Color(0xFF0288D1),
                       );
                     }),
                     const SizedBox(height: 4),
@@ -18966,14 +19061,14 @@ class _OzetEkraniState extends State<OzetEkrani> {
                       _kalemSatiriRenk(
                         'Toplam Gelen',
                         '+ ${_fmt(toplamGelen)}',
-                        const Color(0xFF1A3A5C),
+                        const Color(0xFF0288D1),
                       ),
                     if (toplamGiden > 0 && toplamGelen > 0)
                       _kalemSatiriBold(
                         'Net Transfer',
                         '${netTransfer >= 0 ? '+' : '-'} ${_fmt(netTransfer.abs())}',
                         renk: netTransfer >= 0
-                            ? const Color(0xFF1A3A5C)
+                            ? const Color(0xFF0288D1)
                             : Colors.red[700]!,
                       ),
                   ],
@@ -19588,7 +19683,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
         cell.value = xl.TextCellValue(basliklar[i]);
         cell.cellStyle = xl.CellStyle(
           bold: true,
-          backgroundColorHex: xl.ExcelColor.fromHexString('#1A3A5C'),
+          backgroundColorHex: xl.ExcelColor.fromHexString('#0288D1'),
           fontColorHex: xl.ExcelColor.fromHexString('#FFFFFF'),
         );
       }
@@ -19842,7 +19937,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Önceki Dönemle Karşılaştır'),
                     value: _karsilastirmaAcik,
-                    activeColor: const Color(0xFF1A3A5C),
+                    activeColor: const Color(0xFF0288D1),
                     onChanged: (v) {
                       setState(() {
                         _karsilastirmaAcik = v;
@@ -19985,7 +20080,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                               : const Icon(Icons.search),
                           label: const Text('Raporu Getir'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1A3A5C),
+                            backgroundColor: const Color(0xFF0288D1),
                             foregroundColor: Colors.white,
                           ),
                         ),
@@ -20032,7 +20127,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF1A3A5C).withOpacity(0.08),
+                      color: const Color(0xFF0288D1).withOpacity(0.08),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),
@@ -20043,7 +20138,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                     // ── HEADER ──────────────────────────────────────────────
                     Container(
                       decoration: const BoxDecoration(
-                        color: Color(0xFF1A3A5C),
+                        color: Color(0xFF0288D1),
                         borderRadius: BorderRadius.only(
                           topLeft: Radius.circular(14),
                           topRight: Radius.circular(14),
@@ -20263,7 +20358,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                                               valueColor:
                                                   const AlwaysStoppedAnimation<
                                                     Color
-                                                  >(Color(0xFF1A3A5C)),
+                                                  >(Color(0xFF0288D1)),
                                               minHeight: 5,
                                             ),
                                           ),
@@ -20380,14 +20475,14 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                                         ),
                                         decoration: BoxDecoration(
                                           color: const Color(
-                                            0xFF1A3A5C,
+                                            0xFF0288D1,
                                           ).withOpacity(0.07),
                                           borderRadius: BorderRadius.circular(
                                             6,
                                           ),
                                           border: Border.all(
                                             color: const Color(
-                                              0xFF1A3A5C,
+                                              0xFF0288D1,
                                             ).withOpacity(0.18),
                                           ),
                                         ),
@@ -20409,7 +20504,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
                                               style: const TextStyle(
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.bold,
-                                                color: Color(0xFF1A3A5C),
+                                                color: Color(0xFF0288D1),
                                               ),
                                             ),
                                           ],
