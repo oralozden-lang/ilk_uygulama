@@ -597,7 +597,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.2',
+                'v1.0.3',
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -4824,32 +4824,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           _dovizBankayaYatiranCtrl[t]!.text = _sifirTemizle(dovizBanka?[t]);
         }
       }
-      // Döviz devreden = o günün kaydındaki oncekiDovizKalanlari
-      // (bir önceki günün dovizAnaKasaKalanlari)
+      // Döviz devreden = o günün kaydındaki oncekiDovizAnaKasaKalanlari
+      // TL mantığıyla aynı: alan varsa kullan, yoksa 0
       final oncekiDovizKalanlar = data['oncekiDovizAnaKasaKalanlari'] as Map?;
-      final dovizKalanlar = data['dovizAnaKasaKalanlari'] as Map?;
       for (var t in _dovizTurleri) {
-        if (oncekiDovizKalanlar != null) {
-          _devredenDovizMiktarlari[t] = (oncekiDovizKalanlar[t] ?? 0)
-              .toDouble();
-        } else if (dovizKalanlar != null && dovizKalanlar[t] != null) {
-          final bugunMiktar = _dovizler
-              .where((d) => d['cins'] == t)
-              .fold(
-                0.0,
-                (sum, d) =>
-                    sum +
-                    (_parseDouble(
-                      (d['miktarCtrl'] as TextEditingController).text,
-                    )),
-              );
-          // Negatif çıkmasını önle — eski format kayıtlarda tutarsızlık olabilir
-          final hesap =
-              ((dovizKalanlar[t] ?? 0) as num).toDouble() - bugunMiktar;
-          _devredenDovizMiktarlari[t] = hesap < 0 ? 0 : hesap;
-        } else {
-          _devredenDovizMiktarlari[t] = 0;
-        }
+        _devredenDovizMiktarlari[t] = (oncekiDovizKalanlar?[t] ?? 0).toDouble();
       }
 
       // Transferler
@@ -5220,7 +5199,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     if (!temelKosullar) return false;
     // Kullanıcı için limit kontrolleri — yönetici uyarı alır ama kapat yapabilir
     if (!yonetici) {
-      if (_kasaHarcamaLimitiAsildi) return false;
       if (_anaKasaLimitiAsildi) return false;
     }
     return true;
@@ -6800,10 +6778,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         ),
                         onPressed: _readOnly
                             ? null
-                            : () => setState(() {
-                                _posListesi[idx].dispose();
-                                _posListesi.removeAt(idx);
-                              }),
+                            : () {
+                                setState(() {
+                                  _posListesi[idx].dispose();
+                                  _posListesi.removeAt(idx);
+                                  _degisiklikVar = true;
+                                });
+                                _otomatikKaydetBaslat();
+                              },
                       ),
                   ],
                 ),
@@ -7075,10 +7057,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         ),
                         onPressed: _readOnly
                             ? null
-                            : () => setState(() {
-                                _harcamalar[idx].dispose();
-                                _harcamalar.removeAt(idx);
-                              }),
+                            : () {
+                                setState(() {
+                                  _harcamalar[idx].dispose();
+                                  _harcamalar.removeAt(idx);
+                                  _degisiklikVar = true;
+                                });
+                                _otomatikKaydetBaslat();
+                              },
                       ),
                   ],
                 ),
@@ -7498,12 +7484,16 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       ),
                       onPressed: _readOnly
                           ? null
-                          : () => setState(() {
-                              (d['miktarCtrl'] as TextEditingController)
-                                  .dispose();
-                              (d['kurCtrl'] as TextEditingController).dispose();
-                              _dovizler.removeAt(idx);
-                            }),
+                          : () {
+                              setState(() {
+                                (d['miktarCtrl'] as TextEditingController)
+                                    .dispose();
+                                (d['kurCtrl'] as TextEditingController).dispose();
+                                _dovizler.removeAt(idx);
+                                _degisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                            },
                     ),
                   ],
                 ),
@@ -8761,13 +8751,17 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       ),
                       onPressed: _readOnly
                           ? null
-                          : () => setState(() {
-                              (t['aciklamaCtrl'] as TextEditingController)
-                                  .dispose();
-                              (t['tutarCtrl'] as TextEditingController)
-                                  .dispose();
-                              _digerAlimlar.removeAt(idx);
-                            }),
+                          : () {
+                              setState(() {
+                                (t['aciklamaCtrl'] as TextEditingController)
+                                    .dispose();
+                                (t['tutarCtrl'] as TextEditingController)
+                                    .dispose();
+                                _digerAlimlar.removeAt(idx);
+                                _degisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                            },
                     ),
                   ],
                 ),
@@ -8903,10 +8897,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         ),
                         onPressed: _readOnly
                             ? null
-                            : () => setState(() {
-                                _anaKasaHarcamalari[idx].dispose();
-                                _anaKasaHarcamalari.removeAt(idx);
-                              }),
+                            : () {
+                                setState(() {
+                                  _anaKasaHarcamalari[idx].dispose();
+                                  _anaKasaHarcamalari.removeAt(idx);
+                                  _degisiklikVar = true;
+                                });
+                                _otomatikKaydetBaslat();
+                              },
                       ),
                   ],
                 ),
@@ -9049,10 +9047,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         ),
                         onPressed: _readOnly
                             ? null
-                            : () => setState(() {
-                                _nakitCikislar[idx].dispose();
-                                _nakitCikislar.removeAt(idx);
-                              }),
+                            : () {
+                                setState(() {
+                                  _nakitCikislar[idx].dispose();
+                                  _nakitCikislar.removeAt(idx);
+                                  _degisiklikVar = true;
+                                });
+                                _otomatikKaydetBaslat();
+                              },
                       ),
                   ],
                 ),
@@ -9175,11 +9177,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           ),
                           onPressed: _readOnly
                               ? null
-                              : () => setState(() {
-                                  (d['ctrl'] as TextEditingController)
-                                      .dispose();
-                                  _nakitDovizler.removeAt(idx);
-                                }),
+                              : () {
+                                  setState(() {
+                                    (d['ctrl'] as TextEditingController)
+                                        .dispose();
+                                    _nakitDovizler.removeAt(idx);
+                                    _degisiklikVar = true;
+                                  });
+                                  _otomatikKaydetBaslat();
+                                },
                         ),
                       ],
                     ),
@@ -9489,11 +9495,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           ),
                           onPressed: _readOnly
                               ? null
-                              : () => setState(() {
-                                  (d['ctrl'] as TextEditingController)
-                                      .dispose();
-                                  _bankaDovizler.removeAt(idx);
-                                }),
+                              : () {
+                                  setState(() {
+                                    (d['ctrl'] as TextEditingController)
+                                        .dispose();
+                                    _bankaDovizler.removeAt(idx);
+                                    _degisiklikVar = true;
+                                  });
+                                  _otomatikKaydetBaslat();
+                                },
                         ),
                       ],
                     ),
@@ -10534,40 +10544,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                   ),
                                 ),
                               // İnternet yok uyarısı
-                              // Kasa harcama limit uyarısı
-                              if (_kasaHarcamaLimitiAsildi)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.red[300]!),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.warning_amber_rounded,
-                                        color: Colors.red[700],
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'Harcama ${_formatTL(_toplamHarcama)} — Nakit TL ${_formatTL(_toplamNakitTL)} sinirini asiyor!',
-                                          style: TextStyle(
-                                            color: Colors.red[800],
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
                               // Ana Kasa limit uyarısı
                               if (_anaKasaLimitiAsildi)
                                 Container(
@@ -18474,9 +18450,14 @@ class _OzetEkraniState extends State<OzetEkrani> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Yükleme sırasında ince progress bar — içerik kaybolmaz (göz kırpma yok)
             if (_yukleniyor)
-              const Center(child: CircularProgressIndicator())
-            else if (_kayit == null)
+              const LinearProgressIndicator(
+                minHeight: 3,
+                backgroundColor: Colors.transparent,
+                color: Color(0xFF7B1F2E),
+              ),
+            if (!_yukleniyor && _kayit == null)
               Container(
                 padding: const EdgeInsets.all(32),
                 decoration: BoxDecoration(
@@ -18495,7 +18476,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   ],
                 ),
               )
-            else
+            else if (_kayit != null)
               _ozetIcerik(_kayit!),
           ],
         ),
