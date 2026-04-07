@@ -136,6 +136,21 @@ class KullaniciYetki {
   static const KullaniciYetki kullanici = KullaniciYetki(rolAdi: 'Kullanıcı');
 }
 
+// Döviz cins rengi — tüm ekranlarda ortak kullanım
+Color dovizRenk(String cins) {
+  if (cins == 'USD') return const Color(0xFFE65100); // turuncu
+  if (cins == 'EUR') return const Color(0xFF6A1B9A); // mor
+  if (cins == 'GBP') return const Color(0xFF1B5E20); // yeşil
+  return Colors.blueGrey[700]!;
+}
+
+Color dovizBgRenk(String cins) {
+  if (cins == 'USD') return const Color(0xFFFFF8E1);
+  if (cins == 'EUR') return const Color(0xFFF3E5F5);
+  if (cins == 'GBP') return const Color(0xFFE8F5E9);
+  return Colors.grey[100]!;
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -8034,7 +8049,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     : t == 'EUR'
                     ? '€'
                     : '£';
-                final dovizRenk = _dovizRenk(t);
+                final dovizRenk = dovizRenk(t);
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: Row(
@@ -9807,7 +9822,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   return _ozetSatiri(
                     t,
                     '$sembol ${(_devredenDovizMiktarlari[t] ?? 0).toStringAsFixed(2)}',
-                    _dovizRenk(t),
+                    dovizRenk(t),
                   );
                 }),
             const Divider(),
@@ -9828,7 +9843,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               return _ozetSatiri(
                 t,
                 '$sembol ${_buGunDovizMiktari(t).toStringAsFixed(2)}',
-                _dovizRenk(t),
+                dovizRenk(t),
               );
             }),
             const Divider(),
@@ -9870,7 +9885,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   return _ozetSatiri(
                     cins,
                     '$sembol ${miktar.toStringAsFixed(2)}',
-                    _dovizRenk(cins),
+                    dovizRenk(cins),
                   );
                 }),
             // Nakit Çıkış (varsa)
@@ -14618,21 +14633,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
     return '${neg ? '-' : ''}${buf.toString()}';
   }
 
-  // Döviz cins rengi — USD turuncu, EUR mor, GBP yeşil
-  Color _dovizRenk(String cins) {
-    if (cins == 'USD') return const Color(0xFFE65100); // turuncu
-    if (cins == 'EUR') return const Color(0xFF6A1B9A); // mor
-    if (cins == 'GBP') return const Color(0xFF1B5E20); // yeşil
-    return Colors.blueGrey[700]!;
-  }
 
-  // Döviz cins arka plan rengi
-  Color _dovizBgRenk(String cins) {
-    if (cins == 'USD') return const Color(0xFFFFF8E1);
-    if (cins == 'EUR') return const Color(0xFFF3E5F5);
-    if (cins == 'GBP') return const Color(0xFFE8F5E9);
-    return Colors.grey[100]!;
-  }
 
   // Ayın tüm satışlarını tek sorguda çek
   Future<void> _aylikToplamYukle(String ayKey) async {
@@ -15088,7 +15089,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                             final m = d['miktar'] as double;
                                             return Text(
                                               '$sem${_binAyracSade(m)}',
-                                              style: TextStyle(fontSize: 10, color: _dovizRenk(c), fontWeight: FontWeight.w600),
+                                              style: TextStyle(fontSize: 10, color: dovizRenk(c), fontWeight: FontWeight.w600),
                                             );
                                           }).toList(),
                                         ),
@@ -15148,7 +15149,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                       final m = d['miktar'] as double;
                                       return Text(
                                         '$sem${_binAyracSade(m)}',
-                                        style: TextStyle(fontSize: 11, color: _dovizRenk(c), fontWeight: FontWeight.w600),
+                                        style: TextStyle(fontSize: 11, color: dovizRenk(c), fontWeight: FontWeight.w600),
                                       );
                                     }).toList(),
                                   ),
@@ -15192,7 +15193,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                               final m = d['miktar'] as double;
                                               return Text(
                                                 '$sem${_binAyracSade(m)}',
-                                                style: TextStyle(fontSize: 10, color: _dovizRenk(c), fontWeight: FontWeight.w600),
+                                                style: TextStyle(fontSize: 10, color: dovizRenk(c), fontWeight: FontWeight.w600),
                                               );
                                             }).toList(),
                                           ),
@@ -15260,7 +15261,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                             final m = d['miktar'] as double;
                                             return Text(
                                               '$sem${_binAyracSade(m)}',
-                                              style: TextStyle(fontSize: 10, color: _dovizRenk(c), fontWeight: FontWeight.w600),
+                                              style: TextStyle(fontSize: 10, color: dovizRenk(c), fontWeight: FontWeight.w600),
                                             );
                                           }).toList(),
                                         ),
