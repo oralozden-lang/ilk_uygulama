@@ -597,7 +597,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.5',
+                'v1.0.6',
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -870,6 +870,13 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
       );
       tabViews.add(_rollerTab());
     }
+    // Aktivite Logu — sadece tam yönetici
+    if (y == KullaniciYetki.yonetici) {
+      tabs.add(
+        const Tab(icon: Icon(Icons.history), text: 'Aktivite'),
+      );
+      tabViews.add(_aktiviteTab());
+    }
 
     return DefaultTabController(
       length: tabs.length,
@@ -947,56 +954,78 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                     ad,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Aktif/Pasif
-                      Switch(
-                        value: aktif,
-                        onChanged: (v) => FirebaseFirestore.instance
+                  subtitle: Text(
+                    aktif ? 'Aktif' : 'Pasif',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: aktif ? Colors.green[700] : Colors.grey,
+                    ),
+                  ),
+                  // Tıklayınca direkt şubeye gir
+                  onTap: () async {
+                    final tumSubeler = await FirebaseFirestore.instance
+                        .collection('subeler')
+                        .get();
+                    final subeIdleri = tumSubeler.docs.map((d) => d.id).toList();
+                    if (context.mounted) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => OnHazirlikEkrani(
+                            subeKodu: s.id,
+                            subeler: subeIdleri,
+                            gecmisGunHakki: -1,
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                  trailing: PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: Color(0xFF0288D1)),
+                    onSelected: (val) {
+                      if (val == 'duzenle') _subeDuzenleDialog(s.id, ad);
+                      if (val == 'sil') _subeSilDialog(s.id);
+                      if (val == 'aktif') {
+                        FirebaseFirestore.instance
                             .collection('subeler')
                             .doc(s.id)
-                            .update({'aktif': v}),
-                      ),
-                      // Düzenle
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Color(0xFF0288D1)),
-                        tooltip: 'Şube Adını Düzenle',
-                        onPressed: () => _subeDuzenleDialog(s.id, ad),
-                      ),
-                      // Gir
-                      IconButton(
-                        icon: const Icon(Icons.login, color: Color(0xFF0288D1)),
-                        tooltip: 'Şubeye Gir',
-                        onPressed: () async {
-                          final tumSubeler = await FirebaseFirestore.instance
-                              .collection('subeler')
-                              .get();
-                          final subeIdleri = tumSubeler.docs
-                              .map((d) => d.id)
-                              .toList();
-                          if (context.mounted) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => OnHazirlikEkrani(
-                                  subeKodu: s.id,
-                                  subeler: subeIdleri,
-                                  gecmisGunHakki: -1, // Yönetici sınırsız
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                      // Sil
-                      IconButton(
-                        icon: const Icon(
-                          Icons.delete_outline,
-                          color: Colors.red,
+                            .update({'aktif': !aktif});
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'aktif',
+                        child: Row(
+                          children: [
+                            Icon(
+                              aktif ? Icons.block : Icons.check_circle,
+                              color: aktif ? Colors.orange : Colors.green,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(aktif ? 'Pasife Al' : 'Aktive Et'),
+                          ],
                         ),
-                        tooltip: 'Şubeyi Sil',
-                        onPressed: () => _subeSilDialog(s.id),
+                      ),
+                      const PopupMenuItem(
+                        value: 'duzenle',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit, color: Color(0xFF0288D1), size: 18),
+                            SizedBox(width: 8),
+                            Text('Adını Düzenle'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'sil',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                            SizedBox(width: 8),
+                            Text('Sil', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -2094,6 +2123,156 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
         ),
       ),
     );
+  }
+
+  Widget _aktiviteTab() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _aktiviteYukle(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
+        final kayitlar = snap.data ?? [];
+        if (kayitlar.isEmpty)
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Text(
+                'Son 24 saatte kayıt yok.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+          );
+        return RefreshIndicator(
+          onRefresh: () async => setState(() {}),
+          child: ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: kayitlar.length,
+            itemBuilder: (_, i) {
+              final d = kayitlar[i];
+      builder: (context, snap) {
+        if (!snap.hasData)
+          return const Center(child: CircularProgressIndicator());
+        final docs = snap.data!.docs;
+        if (docs.isEmpty)
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Text(
+                'Son 24 saatte kayıt yok.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+          );
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: docs.length,
+          itemBuilder: (_, i) {
+            final d = docs[i].data() as Map<String, dynamic>;
+            final kaydeden = d['kaydeden'] as String? ?? '—';
+            final subeKodu = d['subeKodu'] as String? ?? '';
+            final tarih = d['tarihGoster'] ?? d['tarih'] ?? '';
+            final zaman = (d['kayitZamani'] as Timestamp?)?.toDate();
+            final zamanStr = zaman != null
+                ? '${zaman.day.toString().padLeft(2, '0')}.${zaman.month.toString().padLeft(2, '0')} ${zaman.hour.toString().padLeft(2, '0')}:${zaman.minute.toString().padLeft(2, '0')}'
+                : '';
+            final satis = ((d['gunlukSatisToplami'] as num?) ?? 0).toDouble();
+            final tamamlandi = d['tamamlandi'] == true;
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: tamamlandi
+                      ? Colors.green[700]
+                      : const Color(0xFF0288D1),
+                  radius: 18,
+                  child: Text(
+                    kaydeden.isNotEmpty ? kaydeden[0].toUpperCase() : '?',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                title: Row(
+                  children: [
+                    Text(
+                      kaydeden,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: tamamlandi ? Colors.green[50] : Colors.blue[50],
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: tamamlandi
+                              ? Colors.green[300]!
+                              : Colors.blue[300]!,
+                        ),
+                      ),
+                      child: Text(
+                        tamamlandi ? 'Kapatıldı' : 'Otomatik',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: tamamlandi
+                              ? Colors.green[700]
+                              : Colors.blue[700],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                subtitle: Text(
+                  '$subeKodu  •  $tarih  •  Satış: ${satis.toStringAsFixed(0)} ₺',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                trailing: Text(
+                  zamanStr,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+              ),
+            );
+          },
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _aktiviteYukle() async {
+    try {
+      final sinir = DateTime.now().subtract(const Duration(hours: 24));
+      final subelerSnap = await FirebaseFirestore.instance
+          .collection('subeler').get();
+      final sonuclar = <Map<String, dynamic>>[];
+      for (final subeDoc in subelerSnap.docs) {
+        final snap = await FirebaseFirestore.instance
+            .collection('subeler')
+            .doc(subeDoc.id)
+            .collection('gunluk')
+            .where('kayitZamani', isGreaterThan: Timestamp.fromDate(sinir))
+            .orderBy('kayitZamani', descending: true)
+            .get();
+        for (final doc in snap.docs) {
+          sonuclar.add({...doc.data(), '_subeId': subeDoc.id});
+        }
+      }
+      sonuclar.sort((a, b) {
+        final za = (a['kayitZamani'] as Timestamp?)?.toDate() ?? DateTime(2000);
+        final zb = (b['kayitZamani'] as Timestamp?)?.toDate() ?? DateTime(2000);
+        return zb.compareTo(za);
+      });
+      return sonuclar;
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<void> _rolSilDialog(String id, String ad) async {
@@ -5500,6 +5679,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         'tarihGoster': _tarihGoster(_secilenTarih),
         'subeKodu': widget.subeKodu,
         'kayitZamani': FieldValue.serverTimestamp(),
+        'kaydeden': _mevcutKullanici,
         'posListesi': _posListesi
             .map(
               (p) => {
@@ -7866,10 +8046,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               ),
               ..._dovizTurleri.where((t) => _buGunDovizMiktari(t) > 0).map((t) {
                 String sembol = t == 'USD'
-                    ? '\$'
+                    ? r'$'
                     : t == 'EUR'
                     ? '€'
                     : '£';
+                final dovizRenk = _dovizRenk(t);
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: Row(
@@ -7878,7 +8059,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       Text(
                         '  ↳ $t Kısmı:',
                         style: TextStyle(
-                          color: Colors.orange[700],
+                          color: dovizRenk,
                           fontSize: 13,
                         ),
                       ),
@@ -7886,7 +8067,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         '$sembol ${_buGunDovizMiktari(t).toStringAsFixed(2)} '
                         '(${_formatTL(_buGunDovizMiktari(t) * _dovizKur(t))})',
                         style: TextStyle(
-                          color: Colors.orange[700],
+                          color: dovizRenk,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
@@ -9642,7 +9823,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   return _ozetSatiri(
                     t,
                     '$sembol ${(_devredenDovizMiktarlari[t] ?? 0).toStringAsFixed(2)}',
-                    Colors.orange[700]!,
+                    _dovizRenk(t),
                   );
                 }),
             const Divider(),
@@ -9663,7 +9844,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               return _ozetSatiri(
                 t,
                 '$sembol ${_buGunDovizMiktari(t).toStringAsFixed(2)}',
-                Colors.orange[700]!,
+                _dovizRenk(t),
               );
             }),
             const Divider(),
@@ -9705,7 +9886,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   return _ozetSatiri(
                     cins,
                     '$sembol ${miktar.toStringAsFixed(2)}',
-                    Colors.orange[700]!,
+                    _dovizRenk(cins),
                   );
                 }),
             // Nakit Çıkış (varsa)
@@ -11765,6 +11946,8 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
     super.initState();
     _subeleriYukle();
     _giderTurleriDinle();
+    // Sayfa açılınca mevcut ay ile otomatik yükle
+    WidgetsBinding.instance.addPostFrameCallback((_) => _yukle());
   }
 
   @override
@@ -15137,7 +15320,9 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                         );
                         return;
                       }
-                      final fark = bugun.difference(tarihDt).inDays;
+                      // Referans: son kapanan gün (bugün değil)
+                      final referansTarih = _aktifSonKapaliTarih ?? bugun;
+                      final fark = referansTarih.difference(tarihDt).inDays;
                       if (fark > widget.gecmisGunHakki) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -15308,6 +15493,8 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
     super.initState();
     _subeAdlariniYukle();
     _giderTurleriYukle();
+    // Sayfa açılınca mevcut ay ile otomatik yükle
+    WidgetsBinding.instance.addPostFrameCallback((_) => _yukle());
   }
 
   @override
@@ -19675,6 +19862,8 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
   void initState() {
     super.initState();
     _subeAdlariniYukle();
+    // Sayfa açılınca mevcut ay ile otomatik yükle
+    WidgetsBinding.instance.addPostFrameCallback((_) => _yukle());
   }
 
   Future<void> _subeAdlariniYukle() async {
