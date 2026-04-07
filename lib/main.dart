@@ -8049,7 +8049,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     : t == 'EUR'
                     ? '€'
                     : '£';
-                final dovizRenk = dovizRenk(t);
+                final cinsRenk = dovizRenk(t);
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: Row(
@@ -8058,7 +8058,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       Text(
                         '  ↳ $t Kısmı:',
                         style: TextStyle(
-                          color: dovizRenk,
+                          color: cinsRenk,
                           fontSize: 13,
                         ),
                       ),
@@ -8066,7 +8066,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         '$sembol ${_buGunDovizMiktari(t).toStringAsFixed(2)} '
                         '(${_formatTL(_buGunDovizMiktari(t) * _dovizKur(t))})',
                         style: TextStyle(
-                          color: dovizRenk,
+                          color: cinsRenk,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
