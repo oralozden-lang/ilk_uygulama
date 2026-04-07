@@ -597,7 +597,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.4',
+                'v1.0.5',
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -9790,11 +9790,27 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 )
                 .map((t) {
                   final sembol = t == 'USD'
-                      ? '\$'
+                      ? r'$'
                       : t == 'EUR'
                       ? '€'
                       : '£';
                   final kalan = _dovizAnaKasaKalani(t);
+                  // Cins bazlı renkler: USD turuncu, EUR mor, GBP koyu yeşil
+                  final bgRenk = t == 'USD'
+                      ? const Color(0xFFFFF8E1)
+                      : t == 'EUR'
+                      ? const Color(0xFFF3E5F5)
+                      : const Color(0xFFE8F5E9);
+                  final yaziRenk = t == 'USD'
+                      ? const Color(0xFFE65100)
+                      : t == 'EUR'
+                      ? const Color(0xFF6A1B9A)
+                      : const Color(0xFF1B5E20);
+                  final borderRenk = t == 'USD'
+                      ? const Color(0xFFFFCC80)
+                      : t == 'EUR'
+                      ? const Color(0xFFCE93D8)
+                      : const Color(0xFFA5D6A7);
                   return Container(
                     margin: const EdgeInsets.only(top: 4),
                     padding: const EdgeInsets.symmetric(
@@ -9802,23 +9818,24 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: kalan >= 0 ? Colors.green[600] : Colors.red[600],
+                      color: bgRenk,
                       borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: borderRenk),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
                           t,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: yaziRenk,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         Text(
                           '$sembol ${kalan.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: kalan >= 0 ? yaziRenk : Colors.red[700],
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
@@ -14308,6 +14325,11 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
   // Aktif şube — başlangıçta widget.subeKodu, dropdown ile değişebilir
   late String _aktifSubeKodu;
   Map<String, String> _subeAdlari = {};
+  // Şube bazlı son kapalı tarih — şube değişince güncellenir
+  DateTime? _aktifSonKapaliTarih;
+  bool _sonKapaliYukleniyor = false;
+  // Önceki veri — göz kırpmayı önlemek için
+  List<QueryDocumentSnapshot>? _oncekiDocs;
 
   // Yönetici ay filtresi
   int _seciliYil = DateTime.now().year;
@@ -14337,7 +14359,47 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
   void initState() {
     super.initState();
     _aktifSubeKodu = widget.subeKodu;
+    _aktifSonKapaliTarih = widget.sonKapaliTarih;
     _subeAdlariniYukle();
+    // Başlangıç şubesi için son kapalı tarihi yükle
+    _sonKapaliTarihiYukle(widget.subeKodu);
+  }
+
+  // Şube için son kapatılan günü Firestore'dan çek
+  Future<void> _sonKapaliTarihiYukle(String subeId) async {
+    if (widget.gecmisGunHakki == -1) return; // Yönetici — gerek yok
+    if (mounted) setState(() => _sonKapaliYukleniyor = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('subeler')
+          .doc(subeId)
+          .collection('gunluk')
+          .orderBy('tarih', descending: true)
+          .get();
+      DateTime? sonKapali;
+      for (final doc in snap.docs) {
+        final d = doc.data();
+        final kapali = d['tamamlandi'] == true ||
+            d['tamamlandi'] == 1 ||
+            d['tamamlandi']?.toString() == 'true';
+        if (kapali) {
+          final tarihStr = d['tarih'] as String? ?? '';
+          final p = tarihStr.split('-');
+          if (p.length == 3) {
+            sonKapali = DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+          }
+          break;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _aktifSonKapaliTarih = sonKapali;
+          _sonKapaliYukleniyor = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _sonKapaliYukleniyor = false);
+    }
   }
 
   Future<void> _subeAdlariniYukle() async {
@@ -14444,14 +14506,15 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
             return '$_seciliYil-${_seciliAy.toString().padLeft(2, '0')}-${sonGun.toString().padLeft(2, '0')}';
           }()
         : null;
-    final referans = widget.sonKapaliTarih ?? bugun;
-    final enEskiTarih = yonetici
+    // Şubeye özgü son kapalı tarih — şube değişince güncellenir
+    final aktifReferans = _aktifSonKapaliTarih;
+    final enEskiTarih = yonetici || aktifReferans == null
         ? null
-        : referans.subtract(Duration(days: widget.gecmisGunHakki));
+        : aktifReferans.subtract(Duration(days: widget.gecmisGunHakki));
     final enEskiKey = enEskiTarih != null ? _tarihKey(enEskiTarih) : null;
     // Kullanıcı için üst sınır: en son kapatılan gün (kapatılmamış gün görünmesin)
-    final enSonKey = (!yonetici && widget.sonKapaliTarih != null)
-        ? _tarihKey(widget.sonKapaliTarih!)
+    final enSonKey = (!yonetici && aktifReferans != null)
+        ? _tarihKey(aktifReferans)
         : null;
 
     return Scaffold(
@@ -14491,9 +14554,12 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                   if (yeni != null && yeni != _aktifSubeKodu) {
                     setState(() {
                       _aktifSubeKodu = yeni;
+                      _aktifSonKapaliTarih = null; // sıfırla, yenisi yüklenecek
                       _aylikToplam.clear();
                       _yuklenenAylar.clear();
+                      // _oncekiDocs korunuyor — göz kırpma yok
                     });
+                    _sonKapaliTarihiYukle(yeni);
                   }
                 },
               )
@@ -14569,7 +14635,7 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                 : widget.gecmisGunHakki > 0
                 ? Text(
                     widget.sonKapaliTarih != null
-                        ? '${_tarihKey(widget.sonKapaliTarih!)} tarihinden ${widget.gecmisGunHakki} gün'
+                        ? '${aktifReferans != null ? _tarihKey(aktifReferans) : '-'} tarihinden ${widget.gecmisGunHakki} gün'
                         : 'Son ${widget.gecmisGunHakki} gün gösteriliyor',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
@@ -14613,16 +14679,20 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                   .orderBy('tarih', descending: true)
                   .snapshots(),
         builder: (context, snapshot) {
+          // Veri gelince önbelleğe al — göz kırpma yok
+          if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+            _oncekiDocs = snapshot.data!.docs;
+          }
+          // Yüklenirken önceki veri varsa onu göster (ince progress bar ile)
           if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
+              (_oncekiDocs == null || _oncekiDocs!.isEmpty)) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Henüz kayıt yok.'));
-          }
 
-          // Sorgu zaten filtrelenmiş — direkt kullan
-          final docs = snapshot.data!.docs;
+          // Aktif docs: yeni geldiyse yeni, yoksa önceki
+          final docs = (snapshot.hasData && snapshot.data!.docs.isNotEmpty)
+              ? snapshot.data!.docs
+              : (_oncekiDocs ?? []);
 
           if (docs.isEmpty) {
             return Center(
@@ -14637,9 +14707,18 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
           }
 
           // Her ay için tek sorgu — sadece en üst (en son) günde aylık toplam göster
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
+          return Column(
+            children: [
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const LinearProgressIndicator(
+                  minHeight: 2,
+                  backgroundColor: Colors.transparent,
+                  color: Color(0xFF0288D1),
+                ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: docs.length,
             itemBuilder: (context, index) {
               final data = docs[index].data() as Map<String, dynamic>;
               final anaKasaKalani = ((data['anaKasaKalani'] as num?) ?? 0)
@@ -14667,34 +14746,39 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                   .toDouble();
               final gunlukKasaKalaniTL =
                   ((data['gunlukKasaKalaniTL'] as num?) ?? 0).toDouble();
-              // Döviz kasa özeti — cins bazlı renkli liste
+              // Döviz kasa özeti — sabit sıra: USD, EUR, GBP
               final dovizListKasa =
                   (data['dovizler'] as List?)?.cast<Map>() ?? [];
               final List<Map<String, dynamic>> dovizKasaOzet = [];
-              for (final d in dovizListKasa) {
-                final miktar = (d['miktar'] as num? ?? 0).toDouble();
-                final cins = d['cins'] as String? ?? '';
-                if (miktar > 0 && cins.isNotEmpty)
-                  dovizKasaOzet.add({'cins': cins, 'miktar': miktar});
+              for (final cins in ['USD', 'EUR', 'GBP']) {
+                double topMiktar = 0;
+                for (final d in dovizListKasa) {
+                  if (d['cins'] == cins)
+                    topMiktar += (d['miktar'] as num? ?? 0).toDouble();
+                }
+                if (topMiktar > 0)
+                  dovizKasaOzet.add({'cins': cins, 'miktar': topMiktar});
               }
-              // Ana Kasa döviz kalanı — cins bazlı renkli liste
+              // Ana Kasa döviz kalanı — sabit sıra: USD, EUR, GBP
               final akDovizMap = (data['dovizAnaKasaKalanlari'] as Map?) ?? {};
               final List<Map<String, dynamic>> akDovizOzet = [];
-              for (final entry in akDovizMap.entries) {
-                final miktar = (entry.value as num? ?? 0).toDouble();
-                final cins = entry.key.toString();
+              for (final cins in ['USD', 'EUR', 'GBP']) {
+                final miktar = (akDovizMap[cins] as num? ?? 0).toDouble();
                 if (miktar > 0)
                   akDovizOzet.add({'cins': cins, 'miktar': miktar});
               }
-              // Döviz bankaya yatan özeti — cins bazlı renkli liste
+              // Döviz bankaya yatan özeti — sabit sıra: USD, EUR, GBP
               final bankaDovizList =
                   (data['bankaDovizler'] as List?)?.cast<Map>() ?? [];
               final List<Map<String, dynamic>> dovizYatanOzet = [];
-              for (final d in bankaDovizList) {
-                final miktar = (d['miktar'] as num? ?? 0).toDouble();
-                final cins = d['cins'] as String? ?? '';
-                if (miktar > 0 && cins.isNotEmpty)
-                  dovizYatanOzet.add({'cins': cins, 'miktar': miktar});
+              for (final cins in ['USD', 'EUR', 'GBP']) {
+                double topMiktar = 0;
+                for (final d in bankaDovizList) {
+                  if (d['cins'] == cins)
+                    topMiktar += (d['miktar'] as num? ?? 0).toDouble();
+                }
+                if (topMiktar > 0)
+                  dovizYatanOzet.add({'cins': cins, 'miktar': topMiktar});
               }
               final tarih = data['tarih'] as String? ?? '';
 
@@ -15083,6 +15167,9 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                 ),
               );
             },
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -15938,15 +16025,26 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
         : cins;
 
     // Döviz özet string
-    String dovizStr(Map<String, dynamic> k, String alan) {
+    // Döviz listesi döndürür — cins bazlı renk için List<Map>
+    List<Map<String, dynamic>> dovizList(Map<String, dynamic> k, String alan) {
       final list = (k[alan] as List?)?.cast<Map>() ?? [];
-      final parts = <String>[];
-      for (final d in list) {
-        final miktar = (d['miktar'] as num? ?? 0).toDouble();
-        if (miktar > 0)
-          parts.add('${sembol(d['cins'] as String? ?? '')}${_fmtSade(miktar)}');
+      final result = <Map<String, dynamic>>[];
+      // Sabit sıra: USD, EUR, GBP
+      for (final cins in ['USD', 'EUR', 'GBP']) {
+        for (final d in list) {
+          if (d['cins'] == cins) {
+            final miktar = (d['miktar'] as num? ?? 0).toDouble();
+            if (miktar > 0) result.add({'cins': cins, 'miktar': miktar});
+          }
+        }
       }
-      return parts.join(' ');
+      return result;
+    }
+    // Geriye dönük uyumluluk için string versiyonu
+    String dovizStr(Map<String, dynamic> k, String alan) {
+      return dovizList(k, alan)
+          .map((d) => '${sembol(d['cins'] as String)}${_fmtSade(d['miktar'] as double)}')
+          .join(' ');
     }
 
     final satirlar = kayitlar.asMap().entries.map((e) {
@@ -16025,7 +16123,7 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
         'nakit': nakit,
         'nakitDoviz': nakitDoviz,
         'bankaya': ((k['bankayaYatirilan'] as num?) ?? 0).toDouble(),
-        'bankaDoviz': dovizStr(k, 'bankaDovizler'),
+        'bankaDoviz': dovizList(k, 'bankaDovizler'),
         'transferGiden': transferGiden,
         'transferGelen': transferGelen,
         'diger': diger,
@@ -16266,12 +16364,32 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
                             SizedBox(width: colGap),
                             _hucre(
                               wBankaya,
-                              _col2(
-                                (s['bankaya'] as double) > 0
-                                    ? _fmt(s['bankaya'] as double)
-                                    : '—',
-                                s['bankaDoviz'] as String,
-                                Colors.teal[700]!,
+                              Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  _txt(
+                                    (s['bankaya'] as double) > 0
+                                        ? _fmt(s['bankaya'] as double)
+                                        : '—',
+                                    renk: Colors.teal[700],
+                                    bold: true,
+                                  ),
+                                  ...(s['bankaDoviz'] as List<Map<String, dynamic>>).map((d) {
+                                    final cn = d['cins'] as String;
+                                    final sem = cn == 'USD' ? r'$' : cn == 'EUR' ? '€' : '£';
+                                    final renk = cn == 'USD'
+                                        ? const Color(0xFFE65100)
+                                        : cn == 'EUR'
+                                        ? const Color(0xFF6A1B9A)
+                                        : const Color(0xFF1B5E20);
+                                    return _txt(
+                                      '$sem${_fmtSade(d['miktar'] as double)}',
+                                      renk: renk,
+                                      size: 10,
+                                    );
+                                  }),
+                                ],
                               ),
                             ),
                             SizedBox(width: colGap),
