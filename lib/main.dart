@@ -2149,102 +2149,86 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
             itemCount: kayitlar.length,
             itemBuilder: (_, i) {
               final d = kayitlar[i];
-      builder: (context, snap) {
-        if (!snap.hasData)
-          return const Center(child: CircularProgressIndicator());
-        final docs = snap.data!.docs;
-        if (docs.isEmpty)
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: Text(
-                'Son 24 saatte kayıt yok.',
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
-          );
-        return ListView.builder(
-          padding: const EdgeInsets.all(12),
-          itemCount: docs.length,
-          itemBuilder: (_, i) {
-            final d = docs[i].data() as Map<String, dynamic>;
-            final kaydeden = d['kaydeden'] as String? ?? '—';
-            final subeKodu = d['subeKodu'] as String? ?? '';
-            final tarih = d['tarihGoster'] ?? d['tarih'] ?? '';
-            final zaman = (d['kayitZamani'] as Timestamp?)?.toDate();
-            final zamanStr = zaman != null
-                ? '${zaman.day.toString().padLeft(2, '0')}.${zaman.month.toString().padLeft(2, '0')} ${zaman.hour.toString().padLeft(2, '0')}:${zaman.minute.toString().padLeft(2, '0')}'
-                : '';
-            final satis = ((d['gunlukSatisToplami'] as num?) ?? 0).toDouble();
-            final tamamlandi = d['tamamlandi'] == true;
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: tamamlandi
-                      ? Colors.green[700]
-                      : const Color(0xFF0288D1),
-                  radius: 18,
-                  child: Text(
-                    kaydeden.isNotEmpty ? kaydeden[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
+              final kaydeden = d['kaydeden'] as String? ?? '—';
+              final subeKodu = d['subeKodu'] as String? ?? '';
+              final tarih = d['tarihGoster'] ?? d['tarih'] ?? '';
+              final zaman = (d['kayitZamani'] as Timestamp?)?.toDate();
+              final zamanStr = zaman != null
+                  ? '${zaman.day.toString().padLeft(2, '0')}.${zaman.month.toString().padLeft(2, '0')} '
+                    '${zaman.hour.toString().padLeft(2, '0')}:${zaman.minute.toString().padLeft(2, '0')}'
+                  : '';
+              final satis = ((d['gunlukSatisToplami'] as num?) ?? 0).toDouble();
+              final tamamlandi = d['tamamlandi'] == true;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: tamamlandi
+                        ? Colors.green[700]
+                        : const Color(0xFF0288D1),
+                    radius: 18,
+                    child: Text(
+                      kaydeden.isNotEmpty ? kaydeden[0].toUpperCase() : '?',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
-                ),
-                title: Row(
-                  children: [
-                    Text(
-                      kaydeden,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
+                  title: Row(
+                    children: [
+                      Text(
+                        kaydeden,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
-                      decoration: BoxDecoration(
-                        color: tamamlandi ? Colors.green[50] : Colors.blue[50],
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
                           color: tamamlandi
-                              ? Colors.green[300]!
-                              : Colors.blue[300]!,
+                              ? Colors.green[50]
+                              : Colors.blue[50],
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: tamamlandi
+                                ? Colors.green[300]!
+                                : Colors.blue[300]!,
+                          ),
+                        ),
+                        child: Text(
+                          tamamlandi ? 'Kapatıldı' : 'Otomatik',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: tamamlandi
+                                ? Colors.green[700]
+                                : Colors.blue[700],
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                      child: Text(
-                        tamamlandi ? 'Kapatıldı' : 'Otomatik',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: tamamlandi
-                              ? Colors.green[700]
-                              : Colors.blue[700],
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  subtitle: Text(
+                    '$subeKodu  •  $tarih  •  Satış: ${satis.toStringAsFixed(0)} ₺',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  trailing: Text(
+                    zamanStr,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
                 ),
-                subtitle: Text(
-                  '$subeKodu  •  $tarih  •  Satış: ${satis.toStringAsFixed(0)} ₺',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                trailing: Text(
-                  zamanStr,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-              ),
-            );
-          },
+              );
             },
           ),
         );
       },
     );
   }
+
 
   Future<List<Map<String, dynamic>>> _aktiviteYukle() async {
     try {
