@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -612,7 +613,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.6',
+                'v1.0.7',
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -11943,10 +11944,14 @@ class _GerceklesenWidgetState extends State<_GerceklesenWidget>
   @override
   void initState() {
     super.initState();
-    _subeleriYukle();
     _giderTurleriDinle();
-    // Sayfa açılınca mevcut ay ile otomatik yükle
-    WidgetsBinding.instance.addPostFrameCallback((_) => _yukle());
+    // Şubeler yüklendikten sonra raporu getir
+    _subeleriYukleVeRaporuGetir();
+  }
+
+  Future<void> _subeleriYukleVeRaporuGetir() async {
+    await _subeleriYukle();
+    if (mounted) _yukle();
   }
 
   @override
@@ -15476,10 +15481,14 @@ class _RaporlarWidgetState extends State<_RaporlarWidget>
   @override
   void initState() {
     super.initState();
-    _subeAdlariniYukle();
     _giderTurleriYukle();
-    // Sayfa açılınca mevcut ay ile otomatik yükle
-    WidgetsBinding.instance.addPostFrameCallback((_) => _yukle());
+    // Şube adları yüklendikten sonra raporu getir
+    _subeAdlariniYukleVeRaporuGetir();
+  }
+
+  Future<void> _subeAdlariniYukleVeRaporuGetir() async {
+    await _subeAdlariniYukle();
+    if (mounted) _yukle();
   }
 
   @override
