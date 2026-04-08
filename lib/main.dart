@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -613,7 +612,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.7',
+                'v1.0.8',
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -2165,7 +2164,8 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
             itemCount: kayitlar.length,
             itemBuilder: (_, i) {
               final d = kayitlar[i];
-              final kaydeden = d['kaydeden'] as String? ?? '—';
+              final kaydeden = d['kaydeden'] as String? ?? '';
+              final kilitKullanici = d['_kilitKullanici'] as String? ?? '';
               final subeKodu = d['subeKodu'] as String? ?? '';
               final tarih = d['tarihGoster'] ?? d['tarih'] ?? '';
               final zaman = (d['kayitZamani'] as Timestamp?)?.toDate();
@@ -2174,17 +2174,40 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                     '${zaman.hour.toString().padLeft(2, '0')}:${zaman.minute.toString().padLeft(2, '0')}'
                   : '';
               final satis = ((d['gunlukSatisToplami'] as num?) ?? 0).toDouble();
-              final tamamlandi = d['tamamlandi'] == true;
+              final tamamlandi = d['tamamlandi'] == true || d['tamamlandi'] == 1;
+              // Gösterilecek ad: kaydeden varsa o, yoksa kilit tutanı göster
+              final gosterimAd = kaydeden.isNotEmpty
+                  ? kaydeden
+                  : kilitKullanici.isNotEmpty
+                  ? kilitKullanici
+                  : '—';
+
+              // Badge rengi ve metni
+              Color badgeRenk;
+              String badgeMeyin;
+              if (tamamlandi) {
+                badgeRenk = Colors.green[700]!;
+                badgeMeyin = 'Kapatıldı';
+              } else if (kaydeden.isNotEmpty) {
+                badgeRenk = Colors.orange[700]!;
+                badgeMeyin = 'Açık Gün';
+              } else {
+                badgeRenk = Colors.blue[700]!;
+                badgeMeyin = 'Otomatik';
+              }
+
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: tamamlandi
                         ? Colors.green[700]
+                        : kaydeden.isNotEmpty
+                        ? Colors.orange[700]
                         : const Color(0xFF0288D1),
                     radius: 18,
                     child: Text(
-                      kaydeden.isNotEmpty ? kaydeden[0].toUpperCase() : '?',
+                      gosterimAd.isNotEmpty ? gosterimAd[0].toUpperCase() : '?',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -2194,9 +2217,12 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                   ),
                   title: Row(
                     children: [
-                      Text(
-                        kaydeden,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      Flexible(
+                        child: Text(
+                          gosterimAd,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Container(
@@ -2205,37 +2231,40 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: tamamlandi
-                              ? Colors.green[50]
-                              : Colors.blue[50],
+                          color: badgeRenk.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: tamamlandi
-                                ? Colors.green[300]!
-                                : Colors.blue[300]!,
-                          ),
+                          border: Border.all(color: badgeRenk.withOpacity(0.5)),
                         ),
                         child: Text(
-                          tamamlandi ? 'Kapatıldı' : 'Otomatik',
+                          badgeMeyin,
                           style: TextStyle(
                             fontSize: 10,
-                            color: tamamlandi
-                                ? Colors.green[700]
-                                : Colors.blue[700],
+                            color: badgeRenk,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                     ],
                   ),
-                  subtitle: Text(
-                    '$subeKodu  •  $tarih  •  Satış: ${satis.toStringAsFixed(0)} ₺',
-                    style: const TextStyle(fontSize: 12),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$subeKodu  •  $tarih  •  Satış: ${satis.toStringAsFixed(0)} ₺',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      if (kilitKullanici.isNotEmpty && kilitKullanici != kaydeden)
+                        Text(
+                          'Kilitleyen: $kilitKullanici',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                    ],
                   ),
                   trailing: Text(
                     zamanStr,
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
+                  isThreeLine: kilitKullanici.isNotEmpty && kilitKullanici != kaydeden,
                 ),
               );
             },
@@ -2261,7 +2290,10 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
             .orderBy('kayitZamani', descending: true)
             .get();
         for (final doc in snap.docs) {
-          sonuclar.add({...doc.data(), '_subeId': subeDoc.id});
+          final d = doc.data();
+          // Kilit bilgisini de ekle
+          final kilitKullanici = d['kullanici'] as String? ?? '';
+          sonuclar.add({...d, '_subeId': subeDoc.id, '_kilitKullanici': kilitKullanici});
         }
       }
       sonuclar.sort((a, b) {
@@ -5580,18 +5612,26 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     if (mounted) {
       try {
         final tarihKeyKontrol = _tarihKey(_secilenTarih);
-        final oncekiSnap = await FirebaseFirestore.instance
+        // Sadece bir önceki günü çek — composite index gerekmez
+        final tumOnce = await FirebaseFirestore.instance
             .collection('subeler')
             .doc(widget.subeKodu)
             .collection('gunluk')
             .where('tarih', isLessThan: tarihKeyKontrol)
-            .where('tamamlandi', isEqualTo: true)
             .orderBy('tarih', descending: true)
             .limit(1)
             .get();
+        // Kapanmış mı kontrol et
+        Map<String, dynamic>? od;
+        for (final d in tumOnce.docs) {
+          final tam = d.data()['tamamlandi'];
+          if (tam == true || tam == 1 || tam?.toString() == 'true') {
+            od = d.data();
+            break;
+          }
+        }
 
-        if (oncekiSnap.docs.isNotEmpty) {
-          final od = oncekiSnap.docs.first.data();
+        if (od != null) {
           final oncekiFlot = (od['gunlukFlot'] as num? ?? 0).toDouble();
           final oncekiAnaKasa = (od['anaKasaKalani'] as num? ?? 0).toDouble();
           final oncekiDovizMap = (od['dovizAnaKasaKalanlari'] as Map?) ?? {};
