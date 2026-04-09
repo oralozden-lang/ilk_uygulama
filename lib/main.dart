@@ -18072,7 +18072,9 @@ class _OzetEkraniState extends State<OzetEkrani> {
                     style: pw.TextStyle(
                       font: fontBold,
                       fontSize: 11,
-                      color: PdfColors.red700,
+                      color: (_toDouble(d['gunlukKasaKalani']) >= 0)
+                          ? PdfColors.green700
+                          : PdfColors.red700,
                     ),
                   ),
                 ],
@@ -18105,14 +18107,13 @@ class _OzetEkraniState extends State<OzetEkrani> {
                 ),
               ),
               // Döviz satırları — her biri farklı renk
-              ...dovizliTurler.asMap().entries.map((entry) {
-                final t = entry.value;
-                final dovizRenkler = [
-                  PdfColors.orange700,
-                  PdfColors.purple700,
-                  PdfColors.teal700,
-                ];
-                final renk = dovizRenkler[entry.key % dovizRenkler.length];
+              ...dovizliTurler.map((t) {
+                // USD turuncu, EUR mor, GBP koyu yeşil
+                final renk = t == 'USD'
+                    ? PdfColor.fromHex('#E65100')
+                    : t == 'EUR'
+                    ? PdfColor.fromHex('#6A1B9A')
+                    : PdfColor.fromHex('#1B5E20');
                 final sembol = dovizSembolleri[t] ?? t;
                 final miktar = dovizMiktarlari[t] ?? 0;
                 final tlK = miktar * (dovizKurlar[t] ?? 0);
@@ -18616,18 +18617,24 @@ class _OzetEkraniState extends State<OzetEkrani> {
       pw.Page(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(16),
-        build: (context) => pw.FittedBox(
-          fit: pw.BoxFit.contain,
-          alignment: pw.Alignment.topCenter,
-          child: pw.SizedBox(
-            width: PdfPageFormat.a4.availableWidth - 32,
-            height: PdfPageFormat.a4.availableHeight - 32,
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-              children: icerik,
+        build: (context) {
+          final pageW = PdfPageFormat.a4.availableWidth - 32;
+          final pageH = PdfPageFormat.a4.availableHeight - 32;
+          // İçeriği sabit genişlikte oluştur, yüksekliği serbest bırak
+          // Sonra FittedBox ile sayfaya sığdır
+          return pw.FittedBox(
+            fit: pw.BoxFit.contain,
+            alignment: pw.Alignment.topCenter,
+            child: pw.SizedBox(
+              width: pageW,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                mainAxisSize: pw.MainAxisSize.min,
+                children: icerik,
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
 
@@ -19146,7 +19153,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
               _kalemSatiriBold(
                 'Günlük Kasa Kalanı',
                 _fmt(gunlukKasaKalani),
-                renk: Colors.red[700]!,
+                renk: gunlukKasaKalani >= 0 ? Colors.green[700]! : Colors.red[700]!,
               ),
               if (dovizliTurler.isNotEmpty) ...[
                 const SizedBox(height: 4),
@@ -19162,7 +19169,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   return _kalemSatiriAlt(
                     '  ↳ $t',
                     '$sembol ${miktar.toStringAsFixed(2)} (${_fmt(tlK)})',
-                    Colors.orange[700]!,
+                    dovizRenk(t),
                   );
                 }),
               ],
