@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_core/firebase_core.dart';
+import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -135,6 +136,9 @@ class KullaniciYetki {
   // Normal kullanıcı — minimum yetki
   static const KullaniciYetki kullanici = KullaniciYetki(rolAdi: 'Kullanıcı');
 }
+
+// Uygulama versiyonu — versiyon bildirimi ve aktivite logu için
+const String _appVersiyon = 'v1.0.9';
 
 // Döviz cins rengi — tüm ekranlarda ortak kullanım
 Color dovizRenk(String cins) {
@@ -340,6 +344,38 @@ class _GirisEkraniState extends State<GirisEkrani> {
   void initState() {
     super.initState();
     _otomatikGiris();
+    _versiyonKontrol();
+  }
+
+  // GitHub'daki son versiyonu kontrol et
+  Future<void> _versiyonKontrol() async {
+    try {
+      final resp = await http.get(Uri.parse(
+        'https://raw.githubusercontent.com/oralozden-lang/ilk_uygulama/main/lib/main.dart',
+      )).timeout(const Duration(seconds: 5));
+      if (resp.statusCode == 200) {
+        final match = RegExp(r"_appVersiyon = '(v[\d.]+)'").firstMatch(resp.body);
+        if (match != null) {
+          final uzak = match.group(1)!;
+          if (uzak != _appVersiyon && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Yeni güncelleme mevcut ($uzak). Sayfayı yenileyin.'),
+                backgroundColor: Colors.orange[700],
+                duration: const Duration(seconds: 6),
+                action: SnackBarAction(
+                  label: 'Tamam',
+                  textColor: Colors.white,
+                  onPressed: () {},
+                ),
+              ),
+            );
+          }
+        }
+      }
+    } catch (_) {
+      // İnternet yoksa sessiz geç
+    }
   }
 
   // Kayıtlı oturum varsa otomatik giriş
@@ -612,7 +648,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'v1.0.8',
+                _appVersiyon,
                 style: TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -2166,6 +2202,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
               final d = kayitlar[i];
               final kaydeden = d['kaydeden'] as String? ?? '';
               final kilitKullanici = d['_kilitKullanici'] as String? ?? '';
+              final versiyon = d['_versiyon'] as String? ?? '';
               final subeKodu = d['subeKodu'] as String? ?? '';
               final tarih = d['tarihGoster'] ?? d['tarih'] ?? '';
               final zaman = (d['kayitZamani'] as Timestamp?)?.toDate();
@@ -2253,6 +2290,11 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                         '$subeKodu  •  $tarih  •  Satış: ${satis.toStringAsFixed(0)} ₺',
                         style: const TextStyle(fontSize: 12),
                       ),
+                      if (versiyon.isNotEmpty)
+                        Text(
+                          versiyon,
+                          style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                        ),
                       if (kilitKullanici.isNotEmpty && kilitKullanici != kaydeden)
                         Text(
                           'Kilitleyen: $kilitKullanici',
@@ -2293,7 +2335,8 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
           final d = doc.data();
           // Kilit bilgisini de ekle
           final kilitKullanici = d['kullanici'] as String? ?? '';
-          sonuclar.add({...d, '_subeId': subeDoc.id, '_kilitKullanici': kilitKullanici});
+          final versiyon = d['versiyon'] as String? ?? '';
+          sonuclar.add({...d, '_subeId': subeDoc.id, '_kilitKullanici': kilitKullanici, '_versiyon': versiyon});
         }
       }
       sonuclar.sort((a, b) {
@@ -2988,7 +3031,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     // Yönetici de kullanıcı gibi son kapatılan gün+1'de açılır
     // Ama istediği güne gitmekte serbesttir (ok, tarih seçici, geçmiş kayıtlar)
     if (widget.gecmisGunHakki == -1) {
-      // Yönetici için de son kapatılmış günü bul
+      // Yönetici için de son kapatılmış günü bul — limit(30) ile hafif
       try {
         final bugun = _bugunuHesapla();
         final snap = await FirebaseFirestore.instance
@@ -2996,23 +3039,36 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             .doc(widget.subeKodu)
             .collection('gunluk')
             .orderBy('tarih', descending: true)
+            .limit(2)
             .get();
         String sonKapaliStr = '';
         for (final doc in snap.docs) {
           final d = doc.data();
-          final kapali = d['tamamlandi'] == true || d['tamamlandi'] == 1 || d['tamamlandi']?.toString() == 'true';
-          if (kapali) { sonKapaliStr = d['tarih'] as String? ?? ''; break; }
+          final kapali = d['tamamlandi'] == true ||
+              d['tamamlandi'] == 1 ||
+              d['tamamlandi']?.toString() == 'true';
+          if (kapali) {
+            sonKapaliStr = d['tarih'] as String? ?? '';
+            break;
+          }
         }
         if (sonKapaliStr.isNotEmpty) {
           final p = sonKapaliStr.split('-');
           if (p.length == 3) {
-            final sonKapali = DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+            final sonKapali = DateTime(
+                int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
             _sonKapaliTarih = sonKapali;
             final sonraki = sonKapali.add(const Duration(days: 1));
             _secilenTarih = sonraki.isAfter(bugun) ? bugun : sonraki;
           }
+        } else {
+          // Hiç kapalı gün yok — bugünde aç
+          _secilenTarih = bugun;
         }
-      } catch (_) {}
+      } catch (_) {
+        // Hata olursa bugünde aç
+        _secilenTarih = _bugunuHesapla();
+      }
       await _mevcutKaydiYukleYaDaTemizle();
       if (mounted) {
         setState(() => _degisiklikVar = false);
@@ -3029,11 +3085,13 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       // Tüm kayıtları tarih sırasına göre çek — client-side filtre
       // where(tamamlandi) + orderBy composite index gerektiriyor,
       // index yoksa sorgu boş dönüyor. Client-side güvenli.
+      // limit(30) ile hafif çekiyor — son 30 günde kapanmış gün mutlaka vardır
       final snap = await FirebaseFirestore.instance
           .collection('subeler')
           .doc(widget.subeKodu)
           .collection('gunluk')
           .orderBy('tarih', descending: true)
+          .limit(2)
           .get();
 
       // En son tamamlandi==true olan günü bul
@@ -5720,6 +5778,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         'subeKodu': widget.subeKodu,
         'kayitZamani': FieldValue.serverTimestamp(),
         'kaydeden': _mevcutKullanici,
+        'versiyon': _appVersiyon,
         'posListesi': _posListesi
             .map(
               (p) => {
@@ -18557,16 +18616,15 @@ class _OzetEkraniState extends State<OzetEkrani> {
       pw.Page(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(16),
-        build: (context) => pw.Center(
-          child: pw.FittedBox(
-            fit: pw.BoxFit.contain,
-            alignment: pw.Alignment.topCenter,
-            child: pw.SizedBox(
-              width: PdfPageFormat.a4.availableWidth - 32,
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                children: icerik,
-              ),
+        build: (context) => pw.FittedBox(
+          fit: pw.BoxFit.contain,
+          alignment: pw.Alignment.topCenter,
+          child: pw.SizedBox(
+            width: PdfPageFormat.a4.availableWidth - 32,
+            height: PdfPageFormat.a4.availableHeight - 32,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: icerik,
             ),
           ),
         ),
