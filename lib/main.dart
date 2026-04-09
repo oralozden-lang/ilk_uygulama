@@ -18170,7 +18170,26 @@ class _OzetEkraniState extends State<OzetEkrani> {
                 fmt(h['tutar']),
               ),
             ),
-        // Döviz nakit çıkışları PDF'te ilgili döviz kartında gösterilir
+        // Döviz nakit çıkışları — TL ile aynı mantık
+        ...((d['nakitDovizler'] as List?)?.cast<Map>() ?? [])
+            .where((nd) => (nd['miktar'] as num? ?? 0) > 0)
+            .map((nd) {
+              final cins = nd['cins'] as String? ?? '';
+              final sembol = cins == 'USD' ? r'$' : cins == 'EUR' ? '€' : cins == 'GBP' ? '£' : cins;
+              final miktar = (nd['miktar'] as num).toDouble();
+              final pdfRenk = cins == 'USD'
+                  ? PdfColor.fromHex('#E65100')
+                  : cins == 'EUR'
+                  ? PdfColor.fromHex('#6A1B9A')
+                  : PdfColor.fromHex('#1B5E20');
+              return satir(
+                nd['aciklama']?.toString().isNotEmpty == true
+                    ? nd['aciklama'].toString()
+                    : 'Nakit $cins Çıkış',
+                '$sembol ${miktar.toStringAsFixed(2)}',
+                style: pw.TextStyle(font: fontBold, fontSize: 10, color: pdfRenk),
+              );
+            }),
       ],
 
       if (anaHarcamalar.isNotEmpty &&
@@ -18622,15 +18641,17 @@ class _OzetEkraniState extends State<OzetEkrani> {
           final pageH = PdfPageFormat.a4.availableHeight - 32;
           // İçeriği sabit genişlikte oluştur, yüksekliği serbest bırak
           // Sonra FittedBox ile sayfaya sığdır
-          return pw.FittedBox(
-            fit: pw.BoxFit.contain,
-            alignment: pw.Alignment.topCenter,
-            child: pw.SizedBox(
-              width: pageW,
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                mainAxisSize: pw.MainAxisSize.min,
-                children: icerik,
+          return pw.Center(
+            child: pw.FittedBox(
+              fit: pw.BoxFit.contain,
+              alignment: pw.Alignment.center,
+              child: pw.SizedBox(
+                width: pageW,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  mainAxisSize: pw.MainAxisSize.min,
+                  children: icerik,
+                ),
               ),
             ),
           );
