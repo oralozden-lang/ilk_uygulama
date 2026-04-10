@@ -2,27 +2,101 @@
 <html>
 <head>
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
-
-  <!-- Cache önleme -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-
-  <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Kasa Takip">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
-
   <title>Kasa Takip</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- SheetJS -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+  <script>
+    window.parseExcelFile = function(uint8array, gunKapanisSaati, callback) {
+      try {
+        var workbook = XLSX.read(uint8array, {type: 'array'});
+        var sheet = workbook.Sheets[workbook.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(sheet, {header: 1, raw: true});
+
+        // Başlık satırını bul
+        var baslikIdx = -1;
+        var uyeNoKol = 0, tutarKol = 5, tarihKol = 15;
+
+        for (var i = 0; i < rows.length; i++) {
+          var str = rows[i].join('|');
+          if (str.indexOf('lem Tutar') >= 0) {
+            baslikIdx = i;
+            for (var j = 0; j < rows[i].length; j++) {
+              var h = String(rows[i][j] || '');
+              if (h.indexOf('ye') >= 0 && h.indexOf('yeri No') >= 0) uyeNoKol = j;
+              if (h.indexOf('lem Tutar') >= 0) tutarKol = j;
+              if (h.indexOf('lem tarihi') >= 0 || h.indexOf('lem Tarihi') >= 0) tarihKol = j;
+            }
+            break;
+          }
+        }
+
+        if (baslikIdx < 0) {
+          callback(JSON.stringify({error: 'Başlık satırı bulunamadı'}));
+          return;
+        }
+
+        // Gün bazlı toplamlar: {uyeNo: {gunKey: toplam}}
+        var gunlukler = {};
+
+        for (var i = baslikIdx + 1; i < rows.length; i++) {
+          var row = rows[i];
+          if (!row || !row[uyeNoKol]) continue;
+
+          // Üye no rakam olmalı
+          var uyeNo = String(row[uyeNoKol]).trim();
+          if (!/^\d+$/.test(uyeNo)) continue;
+
+          // Tutar pozitif olmalı
+          var tutar = parseFloat(row[tutarKol]) || 0;
+          if (tutar <= 0) continue;
+
+          // Tarih parse et: 01.04.2026 21:03:56
+          var tarihStr = String(row[tarihKol] || '');
+          var m = tarihStr.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})/);
+          if (!m) continue;
+
+          var gun = parseInt(m[1]);
+          var ay  = parseInt(m[2]);
+          var yil = parseInt(m[3]);
+          var saat = parseInt(m[4]);
+
+          // Kapanış saatinden önce ise bir önceki güne ait
+          if (saat < gunKapanisSaati) {
+            var dt = new Date(yil, ay - 1, gun);
+            dt.setDate(dt.getDate() - 1);
+            gun = dt.getDate();
+            ay  = dt.getMonth() + 1;
+            yil = dt.getFullYear();
+          }
+
+          var gunKey = yil + '-' +
+            String(ay).padStart(2, '0') + '-' +
+            String(gun).padStart(2, '0');
+
+          if (!gunlukler[uyeNo]) gunlukler[uyeNo] = {};
+          gunlukler[uyeNo][gunKey] = (gunlukler[uyeNo][gunKey] || 0) + tutar;
+        }
+
+        callback(JSON.stringify({ok: true, data: gunlukler}));
+      } catch(e) {
+        callback(JSON.stringify({error: e.toString()}));
+      }
+    };
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
