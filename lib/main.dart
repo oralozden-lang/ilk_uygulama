@@ -143,7 +143,7 @@ class KullaniciYetki {
 }
 
 // Uygulama versiyonu — versiyon bildirimi ve aktivite logu için
-const String _appVersiyon = 'v1.1.5';
+const String _appVersiyon = 'v1.1.7';
 
 // Gün kapanış saati — ayarlar'dan yüklenir, varsayılan 5
 int _gunKapanisSaati = 5;
@@ -21421,6 +21421,13 @@ class _PosKiyaslamaWidgetState extends State<_PosKiyaslamaWidget>
     _subeleriYukle();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Sekmeye her dönüşte şube listesini güncelle
+    _subeleriYukle();
+  }
+
   Future<void> _subeleriYukle() async {
     final snap = await FirebaseFirestore.instance.collection('subeler').get();
     final adlar = <String, String>{};
@@ -21786,9 +21793,20 @@ class _PosKiyaslamaWidgetState extends State<_PosKiyaslamaWidget>
               final excel = s['excel'] as double;
               final program = s['program'] as double;
               final fark = s['fark'] as double;
+              // Tarihi DateTime'a çevir
+              final tarihParts = gun.split('-');
+              final tarihDt = tarihParts.length == 3
+                  ? DateTime(int.parse(tarihParts[0]), int.parse(tarihParts[1]),
+                      int.parse(tarihParts[2]))
+                  : null;
+
               return Card(
                 margin: const EdgeInsets.only(bottom: 6),
-                color: eslesme ? Colors.green[50] : Colors.red[50],
+                color: eslesme
+                    ? Colors.green[50]
+                    : fark > 0
+                        ? Colors.green[50]
+                        : Colors.red[50],
                 child: ListTile(
                   leading: Icon(
                     eslesme ? Icons.check_circle : Icons.error,
@@ -21808,10 +21826,25 @@ class _PosKiyaslamaWidgetState extends State<_PosKiyaslamaWidget>
                       : Text(
                           '${fark >= 0 ? '+' : ''}${_fmtTL(fark)}',
                           style: TextStyle(
-                              color: Colors.red[700],
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13),
+                            color:
+                                fark > 0 ? Colors.green[700] : Colors.red[700],
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
+                  onTap: tarihDt == null || _secilenSube == null
+                      ? null
+                      : () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => OnHazirlikEkrani(
+                                subeKodu: _secilenSube!,
+                                subeler: widget.subeler,
+                                gecmisGunHakki: -1,
+                                baslangicTarihi: tarihDt,
+                              ),
+                            ),
+                          ),
                 ),
               );
             }),
