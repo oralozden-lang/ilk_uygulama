@@ -5856,7 +5856,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   ' → Şu an: ${_oncekiAnaKasaKalani.toStringAsFixed(2)}';
             if (dovizUyusmuyor) detay += dovizDetay;
 
-            await showDialog<void>(
+            final onay = await showDialog<bool>(
               context: context,
               barrierDismissible: false,
               builder: (ctx) => AlertDialog(
@@ -5870,18 +5870,32 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 content: Text(
                   '$oncekiTarihGoster tarihli kapanmış günden\n'
                   'aktarılan değerler bu güne yansımamış:$detay\n\n'
-                  'Lütfen $oncekiTarihGoster tarihine gidip\n'
-                  'günü tekrar kapatın, sonra buraya dönün.',
+                  'Değerler otomatik düzeltilerek gün kapatılsın mı?',
                 ),
                 actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('İptal', style: TextStyle(color: Colors.red)),
+                  ),
                   FilledButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Tamam'),
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Düzelt ve Kapat'),
                   ),
                 ],
               ),
             );
-            return; // Kapatmayı engelle
+            if (onay != true) return; // İptal — kapatmayı engelle
+            // Değerleri Firestore'daki doğru değerlerle güncelle
+            setState(() {
+              _oncekiAnaKasaKalani = oncekiAnaKasa;
+              _devredenFlotCtrl.text = _formatTL(oncekiFlot).replaceAll(' ₺', '');
+              _otomatikDevredenFlot = oncekiFlot;
+              for (var t in _dovizTurleri) {
+                _devredenDovizMiktarlari[t] =
+                    (oncekiDovizMap[t] as num? ?? 0).toDouble();
+              }
+            });
+            // Devam et — kapatma işlemi aşağıda sürecek
           }
         }
       } catch (_) {
