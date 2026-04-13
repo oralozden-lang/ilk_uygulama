@@ -143,7 +143,7 @@ class KullaniciYetki {
 }
 
 // Uygulama versiyonu — versiyon bildirimi ve aktivite logu için
-const String _appVersiyon = 'v1.1.7';
+const String _appVersiyon = 'v1.1.8';
 
 // Gün kapanış saati — ayarlar'dan yüklenir, varsayılan 5
 int _gunKapanisSaati = 5;
@@ -3644,6 +3644,12 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           .toList(),
       'toplamAnaKasaHarcama': _toplamAnaKasaHarcama,
       'anaKasaKalani': _anaKasaKalani,
+      'dovizAnaKasaKalanlari': {
+        for (var t in _dovizTurleri) t: _dovizAnaKasaKalani(t),
+      },
+      'oncekiDovizAnaKasaKalanlari': {
+        for (var t in _dovizTurleri) t: _devredenDovizMiktarlari[t] ?? 0,
+      },
       'digerAlimlar': _digerAlimlar
           .map(
         (t) => {
@@ -18464,30 +18470,23 @@ class _OzetEkraniState extends State<OzetEkrani> {
                       (dovizMiktarlari[t] ?? 0) > 0;
                 })
                 .toList()
-                .asMap()
-                .entries
-                .map((entry) {
-                  final t = entry.value;
-                  final idx = entry.key;
-                  // Her döviz farklı renk paleti
-                  const bgRenkler = [
-                    PdfColors.orange50,
-                    PdfColors.purple50,
-                    PdfColors.teal50,
-                  ];
-                  const yaziRenkler = [
-                    PdfColors.orange800,
-                    PdfColors.purple800,
-                    PdfColors.teal800,
-                  ];
-                  const kalanRenkler = [
-                    PdfColors.deepOrange700,
-                    PdfColors.purple700,
-                    PdfColors.teal700,
-                  ];
-                  final bgRenk = bgRenkler[idx % bgRenkler.length];
-                  final yaziRenk = yaziRenkler[idx % yaziRenkler.length];
-                  final kalanRenk = kalanRenkler[idx % kalanRenkler.length];
+                .map((t) {
+                  // Her döviz cinsine göre sabit renk — USD turuncu, EUR mor, GBP yeşil
+                  final bgRenk = t == 'USD'
+                      ? PdfColors.orange50
+                      : t == 'EUR'
+                      ? PdfColors.purple50
+                      : PdfColors.teal50;
+                  final yaziRenk = t == 'USD'
+                      ? PdfColors.orange800
+                      : t == 'EUR'
+                      ? PdfColors.purple800
+                      : PdfColors.teal800;
+                  final kalanRenk = t == 'USD'
+                      ? PdfColors.deepOrange700
+                      : t == 'EUR'
+                      ? PdfColors.purple700
+                      : PdfColors.teal700;
 
                   final sembol = dovizSembolleri[t] ?? t;
                   final kalan = (dovizKalanlar?[t] as num?)?.toDouble() ?? 0;
@@ -19471,15 +19470,12 @@ class _OzetEkraniState extends State<OzetEkrani> {
                 ),
               ),
               // Dövizler — PDF ile aynı renk paleti
-              ...dovizTurleri.asMap().entries.where((entry) {
-                final t = entry.value;
+              ...dovizTurleri.where((t) {
                 final kalan = _toDouble(dovizKalanlar?[t]);
                 final devreden = _toDouble(oncekiDovizKalanlar?[t]);
                 final miktar = dovizMiktarlari[t] ?? 0;
                 return kalan != 0 || devreden != 0 || miktar > 0;
-              }).map((entry) {
-                final idx = entry.key;
-                final t = entry.value;
+              }).map((t) {
                 final sembol = _sembol(t);
                 final kalan = _toDouble(dovizKalanlar?[t]);
                 final devreden = _toDouble(oncekiDovizKalanlar?[t]);
@@ -19488,25 +19484,22 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   if (bd['cins'] == t) bankaYatan += _toDouble(bd['miktar']);
                 }
 
-                // PDF ile aynı renk paleti
-                final bgRenkler = [
-                  Colors.orange[50]!,
-                  Colors.purple[50]!,
-                  Colors.teal[50]!,
-                ];
-                final yaziRenkler = [
-                  Colors.orange[800]!,
-                  Colors.purple[800]!,
-                  Colors.teal[800]!,
-                ];
-                final kalanRenkler = [
-                  Colors.deepOrange[700]!,
-                  Colors.purple[700]!,
-                  Colors.teal[700]!,
-                ];
-                final bgRenk = bgRenkler[idx % bgRenkler.length];
-                final yaziRenk = yaziRenkler[idx % yaziRenkler.length];
-                final kalanRenk = kalanRenkler[idx % kalanRenkler.length];
+                // Döviz cinsine göre sabit renk — USD turuncu, EUR mor, GBP yeşil
+                final bgRenk = t == 'USD'
+                    ? Colors.orange[50]!
+                    : t == 'EUR'
+                    ? Colors.purple[50]!
+                    : Colors.teal[50]!;
+                final yaziRenk = t == 'USD'
+                    ? Colors.orange[800]!
+                    : t == 'EUR'
+                    ? Colors.purple[800]!
+                    : Colors.teal[800]!;
+                final kalanRenk = t == 'USD'
+                    ? Colors.deepOrange[700]!
+                    : t == 'EUR'
+                    ? Colors.purple[700]!
+                    : Colors.teal[700]!;
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -20181,6 +20174,7 @@ class _SubeOzetTablosuState extends State<_SubeOzetTablosu>
           .collection('gunluk')
           .where('tarih', isGreaterThanOrEqualTo: bas)
           .where('tarih', isLessThanOrEqualTo: bit)
+          .orderBy('tarih')
           .get();
 
       double ciro = 0,
