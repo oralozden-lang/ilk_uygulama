@@ -5475,11 +5475,21 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           .collection('gunluk')
           .where('tarih', isLessThan: tarihKey)
           .orderBy('tarih', descending: true)
-          .limit(1)
+          .limit(3)
           .get();
 
-      if (kayitlar.docs.isNotEmpty) {
-        final data = kayitlar.docs.first.data();
+      // Sadece kapatılmış günden devir al — kapatılmamış günü atla
+      Map<String, dynamic>? kapatilmisGun;
+      for (final doc in kayitlar.docs) {
+        final tam = doc.data()['tamamlandi'];
+        if (tam == true || tam == 1 || tam?.toString() == 'true') {
+          kapatilmisGun = doc.data();
+          break;
+        }
+      }
+
+      if (kapatilmisGun != null) {
+        final data = kapatilmisGun;
         final flot = data['gunlukFlot'];
         if (flot != null) {
           final flotDeger = (flot as num).toDouble();
