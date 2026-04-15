@@ -143,7 +143,7 @@ class KullaniciYetki {
 }
 
 // Uygulama versiyonu — versiyon bildirimi ve aktivite logu için
-const String _appVersiyon = 'v1.1.8';
+const String _appVersiyon = 'v1.1.9';
 
 // Gün kapanış saati — ayarlar'dan yüklenir, varsayılan 5
 int _gunKapanisSaati = 5;
@@ -2375,14 +2375,60 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                           style:
                               TextStyle(fontSize: 11, color: Colors.grey[600]),
                         ),
+                      // aktiviteLog — Günü Kapat ve Düzenlemeyi Aç geçmişi
+                      ...() {
+                        final log = (d['aktiviteLog'] as List?)?.cast<Map>() ?? [];
+                        if (log.isEmpty) return <Widget>[];
+                        return log.map((e) {
+                          final islem = e['islem'] as String? ?? '';
+                          final kul = e['kullanici'] as String? ?? '';
+                          final zam = (e['zaman'] as Timestamp?)?.toDate();
+                          final zamStr = zam != null
+                              ? '${zam.day.toString().padLeft(2, '0')}.${zam.month.toString().padLeft(2, '0')} ${zam.hour.toString().padLeft(2, '0')}:${zam.minute.toString().padLeft(2, '0')}'
+                              : '';
+                          final islemRenk = islem == 'Günü Kapat'
+                              ? Colors.green[700]!
+                              : Colors.orange[700]!;
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  islem == 'Günü Kapat'
+                                      ? Icons.lock
+                                      : Icons.lock_open,
+                                  size: 11,
+                                  color: islemRenk,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$islem — $kul',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: islemRenk,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  zamStr,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey[500],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList();
+                      }(),
                     ],
                   ),
                   trailing: Text(
                     zamanStr,
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
-                  isThreeLine:
-                      kilitKullanici.isNotEmpty && kilitKullanici != kaydeden,
+                  isThreeLine: true,
                 ),
               );
             },
@@ -6071,6 +6117,13 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           for (var t in _dovizTurleri) t: _devredenDovizMiktarlari[t] ?? 0,
         },
         'tamamlandi': true, // Günü Kapat yapıldı
+        'aktiviteLog': FieldValue.arrayUnion([
+          {
+            'islem': 'Günü Kapat',
+            'kullanici': _mevcutKullanici,
+            'zaman': Timestamp.now(),
+          }
+        ]),
       };
 
       // ── Düzenleme modu açıkken Günü Kapat engellensin ────────────────────
@@ -11123,7 +11176,16 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                           .doc(widget.subeKodu)
                                           .collection('gunluk')
                                           .doc(_tarihKey(_secilenTarih))
-                                          .update({'tamamlandi': false});
+                                          .update({
+                                            'tamamlandi': false,
+                                            'aktiviteLog': FieldValue.arrayUnion([
+                                              {
+                                                'islem': 'Düzenlemeyi Aç',
+                                                'kullanici': _mevcutKullanici,
+                                                'zaman': Timestamp.now(),
+                                              }
+                                            ]),
+                                          });
                                       if (mounted) {
                                         setState(() {
                                           _gunuKapatildi = false;
