@@ -16,6 +16,8 @@ import 'dart:js' as js;
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:async';
 import 'excel_download.dart';
@@ -4010,6 +4012,232 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     } catch (_) {}
   }
 
+  // ── Pulse Resmi Okuma ────────────────────────────────────────────────────────
+
+  Future<void> _pulseResmiOku() async {
+    try {
+      // Resim seç
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+      );
+      if (picked == null) return;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Resim okunuyor...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      // ML Kit ile metin tanı
+      final inputImage = InputImage.fromFilePath(picked.path);
+      final recognizer = TextRecognizer();
+      final recognized = await recognizer.processImage(inputImage);
+      await recognizer.close();
+
+      final metin = recognized.text;
+      if (metin.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Resimden metin okunamadı. Daha net bir resim deneyin.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Satırlara böl
+      final satirlar = metin.split('\n').map((s) => s.trim()).toList();
+
+      // Pulse formatında sayı parse et (virgül bin ayracı, nokta ondalık)
+      double? pulseParseDouble(String s) {
+        // "TL22,384.63" veya "22,384.63" formatı
+        final temiz = s.replaceAll(RegExp(r'[TL\s₺]'), '').trim();
+        final sayiTemiz = temiz.replaceAll(',', '');
+        return double.tryParse(sayiTemiz);
+      }
+
+      // Etiket → değer eşleştirme
+      // Satır: "Banka Parası   TL10,860.00" gibi
+      double? degerBul(String etiket) {
+        for (int i = 0; i < satirlar.length; i++) {
+          final satir = satirlar[i].toUpperCase();
+          if (satir.contains(etiket.toUpperCase())) {
+            // Aynı satırda sayı ara
+            final sayiMatch = RegExp(r'TL[\d,\.]+').firstMatch(satirlar[i]);
+            if (sayiMatch != null) {
+              return pulseParseDouble(sayiMatch.group(0)!);
+            }
+            // Sonraki satırda ara
+            if (i + 1 < satirlar.length) {
+              final sonrakiMatch =
+                  RegExp(r'TL[\d,\.]+').firstMatch(satirlar[i + 1]);
+              if (sonrakiMatch != null) {
+                return pulseParseDouble(sonrakiMatch.group(0)!);
+              }
+            }
+          }
+        }
+        return null;
+      }
+
+      // Okunan değerleri topla
+      final Map<String, double> okunan = {};
+
+      // Online ödemeler — pulseAdi ile eşleştir
+      final onlineSnap = await FirebaseFirestore.instance
+          .collection('odemeyontemleri')
+          .where('tip', isEqualTo: 'online')
+          .where('aktif', isEqualTo: true)
+          .get();
+
+      for (var doc in onlineSnap.docs) {
+        final ad = doc.data()['ad'] as String? ?? '';
+        final pulseAdi = doc.data()['pulseAdi'] as String? ?? '';
+        if (pulseAdi.isEmpty) continue;
+        final deger = degerBul(pulseAdi);
+        if (deger != null) okunan[ad] = deger;
+      }
+
+      // Brüt Satış → Günlük Satış
+      final brutSatis = degerBul('Brüt Satis') ??
+          degerBul('Brut Satis') ??
+          degerBul('BRUT SATIS') ??
+          degerBul('Genel Toplam');
+      if (brutSatis != null) okunan['__gunlukSatis__'] = brutSatis;
+
+      // Banka Parası → Ekranda Görünen Nakit
+      final bankaPara = degerBul('Banka Parasi') ??
+          degerBul('Banka Parası') ??
+          degerBul('BANKA PARASI');
+      if (bankaPara != null) okunan['__ekrandaNakit__'] = bankaPara;
+
+      if (okunan.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Eşleşen veri bulunamadı. Pulse ekranı net çekilmiş mi?'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Onay ekranı göster
+      if (!mounted) return;
+      final onaylandi = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.camera_alt, color: Color(0xFF0288D1)),
+              SizedBox(width: 8),
+              Text('Okunan Veriler'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Aşağıdaki veriler okundu. Kontrol edip onaylayın:',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                ...okunan.entries.map((e) {
+                  String ad = e.key;
+                  if (ad == '__gunlukSatis__') ad = 'Günlük Satış';
+                  if (ad == '__ekrandaNakit__') ad = 'Ekranda Görünen Nakit';
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(ad, style: const TextStyle(fontSize: 13)),
+                        ),
+                        Text(
+                          _formatTL(e.value),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF0288D1),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('İptal', style: TextStyle(color: Colors.red)),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Onayla ve Doldur'),
+            ),
+          ],
+        ),
+      );
+
+      if (onaylandi != true || !mounted) return;
+
+      // Değerleri uygula
+      setState(() {
+        for (var o in _onlineOdemeler) {
+          final ad = o['ad'] as String;
+          if (okunan.containsKey(ad)) {
+            (o['ctrl'] as TextEditingController).text =
+                _formatTL(okunan[ad]!).replaceAll(' ₺', '');
+          }
+        }
+        if (okunan.containsKey('__gunlukSatis__')) {
+          _gunlukSatisCtrl.text =
+              _formatTL(okunan['__gunlukSatis__']!).replaceAll(' ₺', '');
+        }
+        if (okunan.containsKey('__ekrandaNakit__')) {
+          _ekrandaGorunenNakitCtrl.text =
+              _formatTL(okunan['__ekrandaNakit__']!).replaceAll(' ₺', '');
+        }
+        _degisiklikVar = true;
+        if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+      });
+      _otomatikKaydetBaslat();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${okunan.length} alan dolduruldu ✓'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Hata: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _onlineOdemeleriYukle() async {
     try {
       final snap = await FirebaseFirestore.instance
@@ -7917,7 +8145,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: null, // ML Kit sonra eklenecek
+                  onPressed: _readOnly ? null : _pulseResmiOku,
                   icon: const Icon(Icons.camera_alt_outlined, size: 16),
                   label:
                       const Text('Pulse Resmi', style: TextStyle(fontSize: 12)),
