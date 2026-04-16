@@ -5806,6 +5806,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     return t;
   }
 
+  // Ekranda Görünen Nakit otomatik hesaplama
+  // Günlük Satış − POS − Yemek Kartı − Online Ödemeler
+  double get _hesaplananNakit {
+    final satis = _parseDouble(_gunlukSatisCtrl.text);
+    if (satis <= 0) return 0;
+    return satis - _toplamPos - _toplamYemekKarti - _toplamOnlineOdeme;
+  }
+
   // Online ödemeler toplamı
   double get _toplamOnlineOdeme {
     double t = 0;
@@ -7454,20 +7462,25 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 child: Row(
                   children: [
                     Expanded(
-                      flex: 2,
+                      flex: 3,
                       child: DropdownButtonFormField<String>(
-                        value: _yemekKartiCinsleri.contains(y.cins)
-                            ? y.cins
-                            : _yemekKartiCinsleri.first,
+                        value: _yemekKartiCinsleri.isEmpty
+                            ? null
+                            : _yemekKartiCinsleri.contains(y.cins)
+                                ? y.cins
+                                : _yemekKartiCinsleri.first,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Kart',
                           isDense: true,
                         ),
                         items: _yemekKartiCinsleri
+                            .toSet()
                             .map((c) => DropdownMenuItem(
                                   value: c,
                                   child: Text(c,
-                                      style: const TextStyle(fontSize: 13)),
+                                      style: const TextStyle(fontSize: 13),
+                                      overflow: TextOverflow.ellipsis),
                                 ))
                             .toList(),
                         onChanged: _readOnly
@@ -7487,7 +7500,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      flex: 3,
+                      flex: 2,
                       child: TextFormField(
                         controller: y.tutarCtrl,
                         readOnly: _readOnly,
@@ -8057,46 +8070,116 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   // ── Ekranda Görünen Nakit Bölümü ─────────────────────────────────────────────
 
   Widget _ekrandaGorunenNakitSection() {
+    final hesaplanan = _hesaplananNakit;
+    final girilen = _parseDouble(_ekrandaGorunenNakitCtrl.text);
+    final fark = girilen - hesaplanan;
+    final farkVar = girilen > 0 && fark.abs() > 0.02;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.amber[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.amber[700]!, width: 1.5),
-          ),
-          child: TextFormField(
-            controller: _ekrandaGorunenNakitCtrl,
-            readOnly: _readOnly,
-            decoration: InputDecoration(
-              labelText: 'Ekranda Görünen Nakit (₺)',
-              suffixIcon: _zorunluIkon(
-                _parseDouble(_ekrandaGorunenNakitCtrl.text) > 0,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Otomatik hesaplanan
+            if (hesaplanan > 0) ...[
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.amber[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber[300]!),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.calculate_outlined,
+                            size: 16, color: Colors.amber[700]),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Hesaplanan Nakit',
+                          style:
+                              TextStyle(fontSize: 13, color: Colors.amber[800]),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      _formatTL(hesaplanan),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.amber[800],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              suffixText: '₺',
-              hintText: 'Mutlaka girilmeli!',
-              prefixIcon: Icon(Icons.monitor, color: Colors.amber[700]),
-              labelStyle: TextStyle(
-                color: Colors.amber[800],
-                fontWeight: FontWeight.bold,
+              const SizedBox(height: 8),
+              // Otomatik doldur butonu
+              if (!_readOnly && _ekrandaGorunenNakitCtrl.text.isEmpty)
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _ekrandaGorunenNakitCtrl.text =
+                          _formatTL(hesaplanan).replaceAll(' ₺', '');
+                      _degisiklikVar = true;
+                    });
+                    _otomatikKaydetBaslat();
+                  },
+                  icon: const Icon(Icons.auto_fix_high, size: 16),
+                  label: const Text('Otomatik Doldur',
+                      style: TextStyle(fontSize: 12)),
+                ),
+              const SizedBox(height: 4),
+            ],
+            // Manuel giriş
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.amber[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber[700]!, width: 1.5),
               ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
+              child: TextFormField(
+                controller: _ekrandaGorunenNakitCtrl,
+                readOnly: _readOnly,
+                decoration: InputDecoration(
+                  labelText: 'Ekranda Görünen Nakit (₺)',
+                  suffixIcon: _zorunluIkon(
+                    _parseDouble(_ekrandaGorunenNakitCtrl.text) > 0,
+                  ),
+                  suffixText: '₺',
+                  hintText: 'Mutlaka girilmeli!',
+                  prefixIcon: Icon(Icons.monitor, color: Colors.amber[700]),
+                  labelStyle: TextStyle(
+                    color: Colors.amber[800],
+                    fontWeight: FontWeight.bold,
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                textInputAction: TextInputAction.next,
+                inputFormatters: [BinAraciFormatter()],
+                onChanged: (_) => setState(() {
+                  if (!_yukleniyor) {
+                    _degisiklikVar = true;
+                    if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                  }
+                }),
               ),
             ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textInputAction: TextInputAction.next,
-            inputFormatters: [BinAraciFormatter()],
-            onChanged: (_) => setState(() {
-              if (!_yukleniyor) {
-                _degisiklikVar = true;
-                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-              }
-            }),
-          ),
+            // Fark göster
+            if (farkVar) ...[
+              const SizedBox(height: 6),
+              _farkSatiri('Hesaplanan ile Fark', fark),
+            ],
+          ],
         ),
       ),
     );
