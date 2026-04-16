@@ -143,7 +143,7 @@ class KullaniciYetki {
 }
 
 // Uygulama versiyonu — versiyon bildirimi ve aktivite logu için
-const String _appVersiyon = 'v1.1.9';
+const String _appVersiyon = 'v1.2.0';
 
 // Gün kapanış saati — ayarlar'dan yüklenir, varsayılan 5
 int _gunKapanisSaati = 5;
@@ -2377,7 +2377,8 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                         ),
                       // aktiviteLog — Günü Kapat ve Düzenlemeyi Aç geçmişi
                       ...() {
-                        final log = (d['aktiviteLog'] as List?)?.cast<Map>() ?? [];
+                        final log =
+                            (d['aktiviteLog'] as List?)?.cast<Map>() ?? [];
                         if (log.isEmpty) return <Widget>[];
                         return log.map((e) {
                           final islem = e['islem'] as String? ?? '';
@@ -2853,6 +2854,11 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
               ),
 
               const SizedBox(height: 12),
+
+              // Ödeme Yöntemleri
+              const _OdemeYontemleriKart(),
+
+              const SizedBox(height: 16),
 
               // KDV Oranı
               Card(
@@ -3428,7 +3434,21 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused) {
-      // Arka plana atıldı — 20 dakika timer başlat
+      // Arka plana atıldı — bekleyen değişiklik varsa hemen kaydet
+      if (_degisiklikVar || (_otomatikKaydetTimer?.isActive == true)) {
+        _otomatikKaydetTimer?.cancel();
+        final tarihKey = _tarihKey(_secilenTarih);
+        FirebaseFirestore.instance
+            .collection('subeler')
+            .doc(widget.subeKodu)
+            .collection('gunluk')
+            .doc(tarihKey)
+            .set(_otomatikKayitVerisi(), SetOptions(merge: true))
+            .then((_) {
+          if (mounted) setState(() => _degisiklikVar = false);
+        }).catchError((_) {});
+      }
+      // 20 dakika oturum zaman aşımı başlat
       _arkaPlanTimer?.cancel();
       _arkaPlanTimer = Timer(const Duration(minutes: 20), () {
         if (mounted) _oturumZamanAsimi();
@@ -5931,7 +5951,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('İptal', style: TextStyle(color: Colors.red)),
+                    child: const Text('İptal',
+                        style: TextStyle(color: Colors.red)),
                   ),
                   FilledButton(
                     onPressed: () => Navigator.pop(ctx, true),
@@ -5944,7 +5965,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             // Değerleri Firestore'daki doğru değerlerle güncelle
             setState(() {
               _oncekiAnaKasaKalani = oncekiAnaKasa;
-              _devredenFlotCtrl.text = _formatTL(oncekiFlot).replaceAll(' ₺', '');
+              _devredenFlotCtrl.text =
+                  _formatTL(oncekiFlot).replaceAll(' ₺', '');
               _otomatikDevredenFlot = oncekiFlot;
               for (var t in _dovizTurleri) {
                 _devredenDovizMiktarlari[t] =
@@ -11177,15 +11199,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                           .collection('gunluk')
                                           .doc(_tarihKey(_secilenTarih))
                                           .update({
-                                            'tamamlandi': false,
-                                            'aktiviteLog': FieldValue.arrayUnion([
-                                              {
-                                                'islem': 'Düzenlemeyi Aç',
-                                                'kullanici': _mevcutKullanici,
-                                                'zaman': Timestamp.now(),
-                                              }
-                                            ]),
-                                          });
+                                        'tamamlandi': false,
+                                        'aktiviteLog': FieldValue.arrayUnion([
+                                          {
+                                            'islem': 'Düzenlemeyi Aç',
+                                            'kullanici': _mevcutKullanici,
+                                            'zaman': Timestamp.now(),
+                                          }
+                                        ]),
+                                      });
                                       if (mounted) {
                                         setState(() {
                                           _gunuKapatildi = false;
@@ -13451,6 +13473,350 @@ class _DigerAlimAciklamaAlani extends StatelessWidget {
       secenekler: secenekler,
       labelText: 'Açıklama',
       onChanged: onChanged,
+    );
+  }
+}
+
+// ─── Ödeme Yöntemleri Kartı ─────────────────────────────────────────────────────
+
+class _OdemeYontemleriKart extends StatefulWidget {
+  const _OdemeYontemleriKart();
+
+  @override
+  State<_OdemeYontemleriKart> createState() => _OdemeYontemleriKartState();
+}
+
+class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
+  static const _koleksiyon = 'odemeyontemleri';
+
+  List<Map<String, dynamic>> _liste = [];
+  bool _yukleniyor = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _yukle();
+  }
+
+  Future<void> _yukle() async {
+    setState(() => _yukleniyor = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection(_koleksiyon)
+          .orderBy('sira')
+          .get();
+      if (mounted) {
+        setState(() {
+          _liste = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+          _yukleniyor = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _yukleniyor = false);
+    }
+  }
+
+  Future<void> _ekleDialog({Map<String, dynamic>? mevcut}) async {
+    final adCtrl = TextEditingController(text: mevcut?['ad'] ?? '');
+    final pulseCtrl = TextEditingController(text: mevcut?['pulseAdi'] ?? '');
+    final digerCtrl =
+        TextEditingController(text: mevcut?['digerEkranAdi'] ?? '');
+    String tip = mevcut?['tip'] ?? 'yemekKarti';
+    bool aktif = mevcut?['aktif'] ?? true;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text(mevcut == null ? 'Yeni Ödeme Yöntemi' : 'Düzenle'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextFormField(
+                  controller: adCtrl,
+                  decoration:
+                      const InputDecoration(labelText: 'Ad *', isDense: true),
+                  inputFormatters: [IlkHarfBuyukFormatter()],
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: pulseCtrl,
+                  decoration: const InputDecoration(
+                      labelText: "Pulse'daki adı", isDense: true),
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: digerCtrl,
+                  decoration: const InputDecoration(
+                      labelText: 'Diğer ekrandaki adı', isDense: true),
+                ),
+                const SizedBox(height: 12),
+                const Text('Tip',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: const Text('Yemek Kartı',
+                            style: TextStyle(fontSize: 13)),
+                        value: 'yemekKarti',
+                        groupValue: tip,
+                        dense: true,
+                        onChanged: (v) => setDlg(() => tip = v!),
+                      ),
+                    ),
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: const Text('Online',
+                            style: TextStyle(fontSize: 13)),
+                        value: 'online',
+                        groupValue: tip,
+                        dense: true,
+                        onChanged: (v) => setDlg(() => tip = v!),
+                      ),
+                    ),
+                  ],
+                ),
+                SwitchListTile(
+                  title: const Text('Aktif', style: TextStyle(fontSize: 13)),
+                  value: aktif,
+                  dense: true,
+                  onChanged: (v) => setDlg(() => aktif = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('İptal', style: TextStyle(color: Colors.red)),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final ad = adCtrl.text.trim();
+                if (ad.isEmpty) return;
+                final veri = {
+                  'ad': ad,
+                  'pulseAdi': pulseCtrl.text.trim(),
+                  'digerEkranAdi': digerCtrl.text.trim(),
+                  'tip': tip,
+                  'aktif': aktif,
+                  'sira': mevcut?['sira'] ?? _liste.length,
+                };
+                if (mevcut != null) {
+                  await FirebaseFirestore.instance
+                      .collection(_koleksiyon)
+                      .doc(mevcut['id'] as String)
+                      .update(veri);
+                } else {
+                  await FirebaseFirestore.instance
+                      .collection(_koleksiyon)
+                      .add(veri);
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+                await _yukle();
+              },
+              child: const Text('Kaydet'),
+            ),
+          ],
+        ),
+      ),
+    );
+    adCtrl.dispose();
+    pulseCtrl.dispose();
+    digerCtrl.dispose();
+  }
+
+  Future<void> _sil(String id) async {
+    final onay = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Sil'),
+        content: const Text('Bu ödeme yöntemi silinecek. Emin misiniz?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('İptal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
+    if (onay == true) {
+      await FirebaseFirestore.instance.collection(_koleksiyon).doc(id).delete();
+      await _yukle();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Ödeme Yöntemleri',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Yemek kartları ve online ödeme kanalları.',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => _ekleDialog(),
+                  icon: const Icon(Icons.add_circle_outline,
+                      color: Color(0xFF0288D1)),
+                  tooltip: 'Yeni ekle',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_yukleniyor)
+              const Center(child: CircularProgressIndicator())
+            else if (_liste.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Text(
+                    'Henüz ödeme yöntemi eklenmemiş.',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                  ),
+                ),
+              )
+            else
+              ..._liste.map((item) {
+                final ad = item['ad'] as String? ?? '';
+                final tip = item['tip'] as String? ?? 'yemekKarti';
+                final aktif = item['aktif'] as bool? ?? true;
+                final pulseAdi = item['pulseAdi'] as String? ?? '';
+                final digerAdi = item['digerEkranAdi'] as String? ?? '';
+                final tipRenk = tip == 'online'
+                    ? const Color(0xFF0288D1)
+                    : const Color(0xFF6A1B9A);
+                final tipYazi = tip == 'online' ? 'Online' : 'Yemek Kartı';
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: aktif
+                        ? Colors.grey.withOpacity(0.06)
+                        : Colors.grey.withOpacity(0.03),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  ad,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: aktif ? null : Colors.grey,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: tipRenk.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    tipYazi,
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: tipRenk,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                if (!aktif) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'Pasif',
+                                      style: TextStyle(
+                                          fontSize: 10, color: Colors.grey),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (pulseAdi.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  'Pulse: $pulseAdi',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.grey[500]),
+                                ),
+                              ),
+                            if (digerAdi.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 1),
+                                child: Text(
+                                  'Diğer: $digerAdi',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.grey[500]),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined,
+                            size: 18, color: Color(0xFF0288D1)),
+                        onPressed: () => _ekleDialog(mevcut: item),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline,
+                            size: 18, color: Colors.redAccent),
+                        onPressed: () => _sil(item['id'] as String),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -18561,18 +18927,18 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   final bgRenk = t == 'USD'
                       ? PdfColors.orange50
                       : t == 'EUR'
-                      ? PdfColors.purple50
-                      : PdfColors.teal50;
+                          ? PdfColors.purple50
+                          : PdfColors.teal50;
                   final yaziRenk = t == 'USD'
                       ? PdfColors.orange800
                       : t == 'EUR'
-                      ? PdfColors.purple800
-                      : PdfColors.teal800;
+                          ? PdfColors.purple800
+                          : PdfColors.teal800;
                   final kalanRenk = t == 'USD'
                       ? PdfColors.deepOrange700
                       : t == 'EUR'
-                      ? PdfColors.purple700
-                      : PdfColors.teal700;
+                          ? PdfColors.purple700
+                          : PdfColors.teal700;
 
                   final sembol = dovizSembolleri[t] ?? t;
                   final kalan = (dovizKalanlar?[t] as num?)?.toDouble() ?? 0;
@@ -19574,18 +19940,18 @@ class _OzetEkraniState extends State<OzetEkrani> {
                 final bgRenk = t == 'USD'
                     ? Colors.orange[50]!
                     : t == 'EUR'
-                    ? Colors.purple[50]!
-                    : Colors.teal[50]!;
+                        ? Colors.purple[50]!
+                        : Colors.teal[50]!;
                 final yaziRenk = t == 'USD'
                     ? Colors.orange[800]!
                     : t == 'EUR'
-                    ? Colors.purple[800]!
-                    : Colors.teal[800]!;
+                        ? Colors.purple[800]!
+                        : Colors.teal[800]!;
                 final kalanRenk = t == 'USD'
                     ? Colors.deepOrange[700]!
                     : t == 'EUR'
-                    ? Colors.purple[700]!
-                    : Colors.teal[700]!;
+                        ? Colors.purple[700]!
+                        : Colors.teal[700]!;
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
