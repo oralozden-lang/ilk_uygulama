@@ -3036,6 +3036,19 @@ class PosGirisi {
   }
 }
 
+class YemekKartiGirisi {
+  String cins;
+  TextEditingController tutarCtrl;
+  bool yeni;
+
+  YemekKartiGirisi({this.cins = '', String tutar = '', this.yeni = false})
+      : tutarCtrl = TextEditingController(text: tutar);
+
+  void dispose() {
+    tutarCtrl.dispose();
+  }
+}
+
 class HarcamaGirisi {
   TextEditingController aciklamaCtrl;
   TextEditingController tutarCtrl;
@@ -3080,6 +3093,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   Map<String, String> _subeAdlari = {}; // subeId -> subeAdi
 
   final List<PosGirisi> _posListesi = [PosGirisi(ad: 'POS 1')];
+  final List<YemekKartiGirisi> _yemekKartlari = [];
+  final Map<String, TextEditingController> _sistemYemekKartiCtrl = {};
+  List<String> _yemekKartiCinsleri = []; // Firestore'dan yüklenir
+  List<Map<String, dynamic>> _onlineOdemeler = []; // {ad, ctrl}
+  List<String> _onlineOdemeAdlari = []; // Firestore'dan yüklenir
   final TextEditingController _sistemPosCtrl = TextEditingController();
   final TextEditingController _gunlukSatisCtrl = TextEditingController();
   final List<HarcamaGirisi> _harcamalar = [HarcamaGirisi()];
@@ -3154,6 +3172,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     super.initState();
     _banknotlariYukle();
     _giderTurleriYukle();
+    _yemekKartiCinsleriniYukle();
+    _onlineOdemeleriYukle();
     _subeAdlariniYukle();
     for (var t in _dovizTurleri) {
       _dovizBankayaYatiranCtrl[t] = TextEditingController();
@@ -3629,6 +3649,23 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           .toList(),
       'toplamPos': _toplamPos,
       'sistemPos': _parseDouble(_sistemPosCtrl.text),
+      'yemekKartlari': _yemekKartlari
+          .map((y) => {
+                'cins': y.cins,
+                'tutar': _parseDouble(y.tutarCtrl.text),
+              })
+          .toList(),
+      'sistemYemekKartlari': {
+        for (var c in _yemekKartiCinsleri)
+          c: _parseDouble(_sistemYemekKartiCtrl[c]?.text ?? ''),
+      },
+      'onlineOdemeler': _onlineOdemeler
+          .map((o) => {
+                'ad': o['ad'],
+                'tutar':
+                    _parseDouble((o['ctrl'] as TextEditingController).text),
+              })
+          .toList(),
       'gunlukSatisToplami': _parseDouble(_gunlukSatisCtrl.text),
       'harcamalar': _harcamalar
           .map(
@@ -3946,6 +3983,80 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     } catch (_) {}
   }
 
+  Future<void> _yemekKartiCinsleriniYukle() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('odemeyontemleri')
+          .where('tip', isEqualTo: 'yemekKarti')
+          .where('aktif', isEqualTo: true)
+          .get();
+      if (mounted) {
+        final cinsList = snap.docs
+            .map((d) => d.data()['ad'] as String? ?? '')
+            .where((ad) => ad.isNotEmpty)
+            .toList();
+        setState(() {
+          _yemekKartiCinsleri = cinsList;
+          // Sistem Pulse ctrl'lerini hazırla
+          for (var c in cinsList) {
+            _sistemYemekKartiCtrl[c] ??= TextEditingController();
+          }
+          // İlk yemek kartı girişi yoksa boş başlat
+          if (_yemekKartlari.isEmpty && cinsList.isNotEmpty) {
+            _yemekKartlari.add(YemekKartiGirisi(cins: cinsList.first));
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _onlineOdemeleriYukle() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('odemeyontemleri')
+          .where('tip', isEqualTo: 'online')
+          .where('aktif', isEqualTo: true)
+          .get();
+      if (mounted) {
+        final adlar = snap.docs
+            .map((d) => d.data()['ad'] as String? ?? '')
+            .where((ad) => ad.isNotEmpty)
+            .toList();
+        // sira alanına göre sırala
+        final docsWithSira = snap.docs.toList();
+        docsWithSira.sort((a, b) {
+          final sa = (a.data()['sira'] as num?)?.toInt() ?? 999;
+          final sb = (b.data()['sira'] as num?)?.toInt() ?? 999;
+          return sa.compareTo(sb);
+        });
+        final siraliAdlar = docsWithSira
+            .map((d) => d.data()['ad'] as String? ?? '')
+            .where((ad) => ad.isNotEmpty)
+            .toList();
+        setState(() {
+          _onlineOdemeAdlari = siraliAdlar;
+          // Mevcut ctrl'leri koru, yenilerini ekle
+          final mevcutAdlar =
+              _onlineOdemeler.map((o) => o['ad'] as String).toSet();
+          for (var ad in siraliAdlar) {
+            if (!mevcutAdlar.contains(ad)) {
+              _onlineOdemeler.add({
+                'ad': ad,
+                'ctrl': TextEditingController(),
+              });
+            }
+          }
+          // Sırayı düzelt
+          _onlineOdemeler.sort((a, b) {
+            final ia = siraliAdlar.indexOf(a['ad'] as String);
+            final ib = siraliAdlar.indexOf(b['ad'] as String);
+            return ia.compareTo(ib);
+          });
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _banknotAyarlariniKaydet() async {
     try {
       await FirebaseFirestore.instance
@@ -3973,6 +4084,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     _bankayaYatiranCtrl.dispose();
     _manuelFlotCtrl.dispose();
     for (var p in _posListesi) p.dispose();
+    for (var y in _yemekKartlari) y.dispose();
+    for (var c in _sistemYemekKartiCtrl.values) c.dispose();
+    for (var o in _onlineOdemeler) {
+      (o['ctrl'] as TextEditingController).dispose();
+    }
     for (var h in _harcamalar) h.dispose();
     for (var h in _anaKasaHarcamalari) h.dispose();
     for (var h in _nakitCikislar) h.dispose();
@@ -5175,7 +5291,38 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         }
       }
       _sistemPosCtrl.text = _sifirTemizle(data['sistemPos']);
+      // Yemek Kartları
+      for (var y in _yemekKartlari) y.dispose();
+      _yemekKartlari.clear();
+      final yemekList = (data['yemekKartlari'] as List?)?.cast<Map>() ?? [];
+      if (yemekList.isEmpty && _yemekKartiCinsleri.isNotEmpty) {
+        _yemekKartlari.add(YemekKartiGirisi(cins: _yemekKartiCinsleri.first));
+      } else {
+        for (var y in yemekList) {
+          _yemekKartlari.add(
+            YemekKartiGirisi(
+              cins: y['cins'] as String? ?? '',
+              tutar: _sifirTemizle(y['tutar']),
+            ),
+          );
+        }
+      }
+      final sistemYemek = data['sistemYemekKartlari'] as Map?;
+      for (var c in _yemekKartiCinsleri) {
+        _sistemYemekKartiCtrl[c] ??= TextEditingController();
+        _sistemYemekKartiCtrl[c]!.text = _sifirTemizle(sistemYemek?[c]);
+      }
       _gunlukSatisCtrl.text = _sifirTemizle(data['gunlukSatisToplami']);
+      // Online ödemeler
+      final onlineList = (data['onlineOdemeler'] as List?)?.cast<Map>() ?? [];
+      for (var o in _onlineOdemeler) {
+        final kayitli = onlineList.firstWhere(
+          (k) => k['ad'] == o['ad'],
+          orElse: () => {},
+        );
+        (o['ctrl'] as TextEditingController).text =
+            _sifirTemizle(kayitli['tutar']);
+      }
 
       // Harcamalar
       for (var h in _harcamalar) h.dispose();
@@ -5387,6 +5534,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       _posListesi.clear();
       _posListesi.add(PosGirisi(ad: 'POS 1'));
       _sistemPosCtrl.clear();
+      for (var y in _yemekKartlari) y.dispose();
+      _yemekKartlari.clear();
+      if (_yemekKartiCinsleri.isNotEmpty) {
+        _yemekKartlari.add(YemekKartiGirisi(cins: _yemekKartiCinsleri.first));
+      }
+      for (var c in _sistemYemekKartiCtrl.values) c.clear();
+      for (var o in _onlineOdemeler) {
+        (o['ctrl'] as TextEditingController).clear();
+      }
       _gunlukSatisCtrl.clear();
 
       for (var h in _harcamalar) h.dispose();
@@ -5617,6 +5773,52 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   }
 
   double get _posFarki => _toplamPos - _parseDouble(_sistemPosCtrl.text);
+
+  // Yemek kartı cins renkleri
+  static const List<Color> _yemekKartiRenkleri = [
+    Color(0xFF6A1B9A), // mor
+    Color(0xFF0288D1), // mavi
+    Color(0xFF2E7D32), // yeşil
+    Color(0xFFE65100), // turuncu
+    Color(0xFF00838F), // teal
+    Color(0xFFC62828), // kırmızı
+  ];
+
+  Color _yemekKartiRenk(String cins) {
+    final idx = _yemekKartiCinsleri.indexOf(cins);
+    if (idx < 0) return const Color(0xFF6A1B9A);
+    return _yemekKartiRenkleri[idx % _yemekKartiRenkleri.length];
+  }
+
+  // Belirli bir yemek kartı cinsinin toplam tutarı
+  double _yemekKartiCinsToplam(String cins) {
+    double t = 0;
+    for (var y in _yemekKartlari) {
+      if (y.cins == cins) t += _parseDouble(y.tutarCtrl.text);
+    }
+    return t;
+  }
+
+  // Tüm yemek kartları genel toplamı
+  double get _toplamYemekKarti {
+    double t = 0;
+    for (var y in _yemekKartlari) t += _parseDouble(y.tutarCtrl.text);
+    return t;
+  }
+
+  // Online ödemeler toplamı
+  double get _toplamOnlineOdeme {
+    double t = 0;
+    for (var o in _onlineOdemeler) {
+      t += _parseDouble((o['ctrl'] as TextEditingController).text);
+    }
+    return t;
+  }
+
+  // Yemek kartı farkı (cins bazlı)
+  double _yemekKartiFarki(String cins) =>
+      _yemekKartiCinsToplam(cins) -
+      _parseDouble(_sistemYemekKartiCtrl[cins]?.text ?? '');
 
   double get _toplamHarcama {
     double t = 0;
@@ -6002,6 +6204,23 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             .toList(),
         'toplamPos': _toplamPos,
         'sistemPos': _parseDouble(_sistemPosCtrl.text),
+        'yemekKartlari': _yemekKartlari
+            .map((y) => {
+                  'cins': y.cins,
+                  'tutar': _parseDouble(y.tutarCtrl.text),
+                })
+            .toList(),
+        'sistemYemekKartlari': {
+          for (var c in _yemekKartiCinsleri)
+            c: _parseDouble(_sistemYemekKartiCtrl[c]?.text ?? ''),
+        },
+        'onlineOdemeler': _onlineOdemeler
+            .map((o) => {
+                  'ad': o['ad'],
+                  'tutar':
+                      _parseDouble((o['ctrl'] as TextEditingController).text),
+                })
+            .toList(),
         'gunlukSatisToplami': _parseDouble(_gunlukSatisCtrl.text),
         'posFarki': _posFarki,
         'harcamalar': _harcamalar
@@ -7216,6 +7435,253 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     await _mevcutKaydiYukleYaDaTemizle();
   }
 
+  // ── Yemek Kartları Bölümü ────────────────────────────────────────────────────
+
+  Widget _yemekKartiSection() {
+    if (_yemekKartiCinsleri.isEmpty) return const SizedBox.shrink();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionTitle('Yemek Kartları', Icons.credit_card),
+            ..._yemekKartlari.asMap().entries.map((e) {
+              final idx = e.key;
+              final y = e.value;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        value: _yemekKartiCinsleri.contains(y.cins)
+                            ? y.cins
+                            : _yemekKartiCinsleri.first,
+                        decoration: const InputDecoration(
+                          labelText: 'Kart',
+                          isDense: true,
+                        ),
+                        items: _yemekKartiCinsleri
+                            .map((c) => DropdownMenuItem(
+                                  value: c,
+                                  child: Text(c,
+                                      style: const TextStyle(fontSize: 13)),
+                                ))
+                            .toList(),
+                        onChanged: _readOnly
+                            ? null
+                            : (v) {
+                                if (v != null) {
+                                  setState(() {
+                                    _yemekKartlari[idx].cins = v;
+                                    _degisiklikVar = true;
+                                    if (_duzenlemeAcik)
+                                      _gercekDegisiklikVar = true;
+                                  });
+                                  _otomatikKaydetBaslat();
+                                }
+                              },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 3,
+                      child: TextFormField(
+                        controller: y.tutarCtrl,
+                        readOnly: _readOnly,
+                        autofocus: y.yeni,
+                        decoration: const InputDecoration(
+                          labelText: 'Tutar (₺)',
+                          suffixText: '₺',
+                          isDense: true,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textInputAction: TextInputAction.next,
+                        inputFormatters: [BinAraciFormatter()],
+                        onChanged: (_) {
+                          if (mounted && !_yukleniyor) {
+                            setState(() {
+                              _degisiklikVar = true;
+                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                            });
+                            _otomatikKaydetBaslat();
+                            if (_kilitTutuyorum) {
+                              _kilitTimer?.cancel();
+                              _kilitTimer = Timer(
+                                const Duration(minutes: 20),
+                                _kilitBirak,
+                              );
+                            } else {
+                              _kilitAl();
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                    if (_yemekKartlari.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline,
+                            color: Colors.red),
+                        onPressed: _readOnly
+                            ? null
+                            : () {
+                                setState(() {
+                                  _yemekKartlari[idx].dispose();
+                                  _yemekKartlari.removeAt(idx);
+                                  _degisiklikVar = true;
+                                });
+                                _otomatikKaydetBaslat();
+                              },
+                      ),
+                  ],
+                ),
+              );
+            }),
+            TextButton.icon(
+              onPressed: _readOnly || _yemekKartiCinsleri.isEmpty
+                  ? null
+                  : () => setState(() {
+                        _yemekKartlari.add(YemekKartiGirisi(
+                          cins: _yemekKartiCinsleri.first,
+                          yeni: true,
+                        ));
+                      }),
+              icon: const Icon(Icons.add),
+              label: const Text('Satır Ekle'),
+            ),
+            const Divider(),
+            // Cins bazlı toplam + Pulse karşılaştırması
+            ...() {
+              final cinsler = _yemekKartiCinsleri
+                  .where((c) =>
+                      _yemekKartiCinsToplam(c) > 0 ||
+                      (_sistemYemekKartiCtrl[c]?.text.isNotEmpty == true))
+                  .toList();
+              return cinsler.map((cins) {
+                final toplam = _yemekKartiCinsToplam(cins);
+                final fark = _yemekKartiFarki(cins);
+                final farkRenk =
+                    fark.abs() < 0.02 ? Colors.green[700]! : Colors.red[700]!;
+                final cinsRenk = _yemekKartiRenk(cins);
+                return Column(
+                  children: [
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: cinsRenk.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '$cins Toplam',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: cinsRenk,
+                                ),
+                              ),
+                              Text(
+                                _formatTL(toplam),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: cinsRenk,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: cinsRenk.withOpacity(0.07),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: cinsRenk, width: 1.5),
+                            ),
+                            child: TextFormField(
+                              controller: _sistemYemekKartiCtrl[cins],
+                              readOnly: _readOnly,
+                              decoration: InputDecoration(
+                                labelText: 'Pulse — $cins',
+                                suffixText: '₺',
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                labelStyle: TextStyle(
+                                  color: cinsRenk,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true),
+                              inputFormatters: [BinAraciFormatter()],
+                              textAlign: TextAlign.right,
+                              onChanged: (_) {
+                                if (mounted && !_yukleniyor) {
+                                  setState(() {
+                                    _degisiklikVar = true;
+                                    if (_duzenlemeAcik)
+                                      _gercekDegisiklikVar = true;
+                                  });
+                                  _otomatikKaydetBaslat();
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          _farkSatiri('$cins Farkı', fark),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }).toList();
+            }(),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6A1B9A).withOpacity(0.07),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Toplam Yemek Kartı',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Color(0xFF4A148C),
+                    ),
+                  ),
+                  Text(
+                    _formatTL(_toplamYemekKarti),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Color(0xFF4A148C),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── POS Bölümü ──────────────────────────────────────────────────────────────
 
   Widget _posSection() {
@@ -7407,91 +7873,230 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             ),
             const SizedBox(height: 8),
             _farkSatiri('POS Farkı', _posFarki),
-            const SizedBox(height: 12),
-            // Ekranda Görünen Nakit — zorunlu
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.amber[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber[700]!, width: 1.5),
-              ),
-              child: TextFormField(
-                controller: _ekrandaGorunenNakitCtrl,
-                readOnly: _readOnly,
-                decoration: InputDecoration(
-                  labelText: 'Ekranda Görünen Nakit (₺)',
-                  suffixIcon: _zorunluIkon(
-                    _parseDouble(_ekrandaGorunenNakitCtrl.text) > 0,
-                  ),
-                  suffixText: '₺',
-                  hintText: 'Mutlaka girilmeli!',
-                  prefixIcon: Icon(Icons.monitor, color: Colors.amber[700]),
-                  labelStyle: TextStyle(
-                    color: Colors.amber[800],
-                    fontWeight: FontWeight.bold,
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Online Ödemeler Bölümü ──────────────────────────────────────────────────────
+
+  Widget _onlineOdemeSection() {
+    if (_onlineOdemeler.isEmpty) return const SizedBox.shrink();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.language, size: 18, color: Color(0xFF0288D1)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Online Ödemeler',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Color(0xFF0288D1),
+                    ),
                   ),
                 ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+                OutlinedButton.icon(
+                  onPressed: null, // ML Kit sonra eklenecek
+                  icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                  label:
+                      const Text('Pulse Resmi', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0288D1),
+                    side: const BorderSide(color: Color(0xFF0288D1)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
                 ),
-                textInputAction: TextInputAction.next,
-                inputFormatters: [BinAraciFormatter()],
-                onChanged: (_) => setState(() {
-                  if (!_yukleniyor) {
-                    _degisiklikVar = true;
-                    if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                  }
-                }),
-              ),
+              ],
             ),
-            const SizedBox(height: 8),
-            // Günlük Satış Toplamı — zorunlu, kırmızı
+            const SizedBox(height: 12),
+            ..._onlineOdemeler.map((o) {
+              final ad = o['ad'] as String;
+              final ctrl = o['ctrl'] as TextEditingController;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        ad,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: TextFormField(
+                        controller: ctrl,
+                        readOnly: _readOnly,
+                        decoration: const InputDecoration(
+                          suffixText: '₺',
+                          isDense: true,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textInputAction: TextInputAction.next,
+                        inputFormatters: [BinAraciFormatter()],
+                        textAlign: TextAlign.right,
+                        onChanged: (_) {
+                          if (mounted && !_yukleniyor) {
+                            setState(() {
+                              _degisiklikVar = true;
+                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                            });
+                            _otomatikKaydetBaslat();
+                            if (_kilitTutuyorum) {
+                              _kilitTimer?.cancel();
+                              _kilitTimer = Timer(
+                                const Duration(minutes: 20),
+                                _kilitBirak,
+                              );
+                            } else {
+                              _kilitAl();
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const Divider(),
             Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.red[50],
+                color: const Color(0xFF0288D1).withOpacity(0.07),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red[700]!, width: 1.5),
               ),
-              child: TextFormField(
-                controller: _gunlukSatisCtrl,
-                readOnly: _readOnly,
-                decoration: InputDecoration(
-                  labelText: 'Günlük Satış Toplamı (₺)',
-                  suffixIcon: _zorunluIkon(
-                    _parseDouble(_gunlukSatisCtrl.text) > 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Toplam Online',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Color(0xFF0288D1),
+                    ),
                   ),
-                  suffixText: '₺',
-                  hintText: 'Mutlaka girilmeli!',
-                  prefixIcon: Icon(Icons.trending_up, color: Colors.red[700]),
-                  labelStyle: TextStyle(
-                    color: Colors.red[700],
-                    fontWeight: FontWeight.bold,
+                  Text(
+                    _formatTL(_toplamOnlineOdeme),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Color(0xFF0288D1),
+                    ),
                   ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                textInputAction: TextInputAction.next,
-                inputFormatters: [BinAraciFormatter()],
-                onChanged: (_) => setState(() {
-                  if (!_yukleniyor) {
-                    _degisiklikVar = true;
-                    if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                  }
-                }),
+                ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // ── Günlük Satış Bölümü ──────────────────────────────────────────────────────
+
+  Widget _gunlukSatisSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.red[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.red[700]!, width: 1.5),
+          ),
+          child: TextFormField(
+            controller: _gunlukSatisCtrl,
+            readOnly: _readOnly,
+            decoration: InputDecoration(
+              labelText: 'Günlük Satış Toplamı (₺)',
+              suffixIcon: _zorunluIkon(
+                _parseDouble(_gunlukSatisCtrl.text) > 0,
+              ),
+              suffixText: '₺',
+              hintText: 'Mutlaka girilmeli!',
+              prefixIcon: Icon(Icons.trending_up, color: Colors.red[700]),
+              labelStyle: TextStyle(
+                color: Colors.red[700],
+                fontWeight: FontWeight.bold,
+              ),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            textInputAction: TextInputAction.next,
+            inputFormatters: [BinAraciFormatter()],
+            onChanged: (_) => setState(() {
+              if (!_yukleniyor) {
+                _degisiklikVar = true;
+                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+              }
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Ekranda Görünen Nakit Bölümü ─────────────────────────────────────────────
+
+  Widget _ekrandaGorunenNakitSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.amber[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.amber[700]!, width: 1.5),
+          ),
+          child: TextFormField(
+            controller: _ekrandaGorunenNakitCtrl,
+            readOnly: _readOnly,
+            decoration: InputDecoration(
+              labelText: 'Ekranda Görünen Nakit (₺)',
+              suffixIcon: _zorunluIkon(
+                _parseDouble(_ekrandaGorunenNakitCtrl.text) > 0,
+              ),
+              suffixText: '₺',
+              hintText: 'Mutlaka girilmeli!',
+              prefixIcon: Icon(Icons.monitor, color: Colors.amber[700]),
+              labelStyle: TextStyle(
+                color: Colors.amber[800],
+                fontWeight: FontWeight.bold,
+              ),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            textInputAction: TextInputAction.next,
+            inputFormatters: [BinAraciFormatter()],
+            onChanged: (_) => setState(() {
+              if (!_yukleniyor) {
+                _degisiklikVar = true;
+                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+              }
+            }),
+          ),
         ),
       ),
     );
@@ -11029,6 +11634,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                               _tarihSeciciSection(),
                               const SizedBox(height: 12),
                               _posSection(),
+                              const SizedBox(height: 12),
+                              _yemekKartiSection(),
+                              const SizedBox(height: 12),
+                              _gunlukSatisSection(),
+                              const SizedBox(height: 12),
+                              _onlineOdemeSection(),
+                              const SizedBox(height: 12),
+                              _ekrandaGorunenNakitSection(),
                               const SizedBox(height: 12),
                               _harcamalarSection(),
                               const SizedBox(height: 12),
