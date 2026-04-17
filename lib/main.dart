@@ -16,7 +16,6 @@ import 'dart:js' as js;
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:async';
@@ -4016,6 +4015,26 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
 
   Future<void> _pulseResmiOku() async {
     try {
+      // Gemini API key Firestore'dan al
+      final ayarDoc = await FirebaseFirestore.instance
+          .collection('ayarlar')
+          .doc('gemini')
+          .get();
+      final apiKey = ayarDoc.data()?['apiKey'] as String? ?? '';
+      if (apiKey.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Gemini API key girilmemiş. Ayarlar ekranından ekleyin.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+
       // Resim seç
       final picker = ImagePicker();
       final picked = await picker.pickImage(
@@ -4028,23 +4047,91 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Resim okunuyor...'),
-          duration: Duration(seconds: 2),
+          duration: Duration(seconds: 3),
         ),
       );
 
-      // ML Kit ile metin tanı
-      final inputImage = InputImage.fromFilePath(picked.path);
-      final recognizer = TextRecognizer();
-      final recognized = await recognizer.processImage(inputImage);
-      await recognizer.close();
+      // Resmi base64'e çevir
+      final bytes = await picked.readAsBytes();
+      final base64Image = base64Encode(bytes);
+      final mimeType = picked.mimeType ?? 'image/jpeg';
 
-      final metin = recognized.text;
-      if (metin.isEmpty) {
+      // Online ödeme listesini Firestore'dan al
+      final onlineSnap = await FirebaseFirestore.instance
+          .collection('odemeyontemleri')
+          .where('tip', isEqualTo: 'online')
+          .where('aktif', isEqualTo: true)
+          .get();
+
+      // Kanal listesi: sistem adı → Pulse adı eşleşmesi
+      final kanallar = onlineSnap.docs.map((d) {
+        final ad = d.data()['ad'] as String? ?? '';
+        final pulseAdi = d.data()['pulseAdi'] as String? ?? '';
+        return pulseAdi.isNotEmpty ? '$ad (Pulse\'daki adı: $pulseAdi)' : ad;
+      }).join(', ');
+
+      // Gemini'ye gönderilecek prompt
+      final prompt = """Bu bir Pulse POS/kasa programı ekran görüntüsü.
+Aşağıdaki verileri JSON formatında çıkar:
+- brutsatis: Brüt Satış veya Genel Toplam rakamı (sadece sayı)
+- bankapara: Banka Parası veya Kalan Nakit rakamı (sadece sayı)
+- online: her online ödeme kanalı için {ad, tutar} listesi.
+  Kanallar: $kanallar
+  Pulse'daki adını bul, sistem adını kullan.
+
+Sadece JSON dön, başka açıklama yazma. Örnek:
+{"brutsatis": 96614.57, "bankapara": 10860.00, "online": [{"ad": "Getir Online", "tutar": 1819.00}]}
+
+Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
+
+      // Gemini API isteği
+      final response = await http.post(
+        Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=$apiKey',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {
+                  'inline_data': {
+                    'mime_type': mimeType,
+                    'data': base64Image,
+                  }
+                },
+                {'text': prompt}
+              ]
+            }
+          ],
+          'generationConfig': {
+            'temperature': 0,
+          }
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('API hatası: ${response.statusCode}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Yanıtı parse et
+      final responseJson = jsonDecode(response.body);
+      final text = responseJson['candidates']?[0]?['content']?['parts']?[0]
+              ?['text'] as String? ??
+          '';
+      if (text.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content:
-                  Text('Resimden metin okunamadı. Daha net bir resim deneyin.'),
+              content: Text('Resimden veri alınamadı.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -4052,71 +4139,28 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         return;
       }
 
-      // Satırlara böl
-      final satirlar = metin.split('\n').map((s) => s.trim()).toList();
+      // JSON parse
+      final cleanText = text.replaceAll(RegExp(r'```json|```'), '').trim();
+      final Map<String, dynamic> geminiOkunan = jsonDecode(cleanText);
 
-      // Pulse formatında sayı parse et (virgül bin ayracı, nokta ondalık)
-      double? pulseParseDouble(String s) {
-        // "TL22,384.63" veya "22,384.63" formatı
-        final temiz = s.replaceAll(RegExp(r'[TL\s₺]'), '').trim();
-        final sayiTemiz = temiz.replaceAll(',', '');
-        return double.tryParse(sayiTemiz);
-      }
-
-      // Etiket → değer eşleştirme
-      // Satır: "Banka Parası   TL10,860.00" gibi
-      double? degerBul(String etiket) {
-        for (int i = 0; i < satirlar.length; i++) {
-          final satir = satirlar[i].toUpperCase();
-          if (satir.contains(etiket.toUpperCase())) {
-            // Aynı satırda sayı ara
-            final sayiMatch = RegExp(r'TL[\d,\.]+').firstMatch(satirlar[i]);
-            if (sayiMatch != null) {
-              return pulseParseDouble(sayiMatch.group(0)!);
-            }
-            // Sonraki satırda ara
-            if (i + 1 < satirlar.length) {
-              final sonrakiMatch =
-                  RegExp(r'TL[\d,\.]+').firstMatch(satirlar[i + 1]);
-              if (sonrakiMatch != null) {
-                return pulseParseDouble(sonrakiMatch.group(0)!);
-              }
-            }
-          }
-        }
-        return null;
-      }
-
-      // Okunan değerleri topla
+      // Düz Map'e çevir
       final Map<String, double> okunan = {};
 
-      // Online ödemeler — pulseAdi ile eşleştir
-      final onlineSnap = await FirebaseFirestore.instance
-          .collection('odemeyontemleri')
-          .where('tip', isEqualTo: 'online')
-          .where('aktif', isEqualTo: true)
-          .get();
-
-      for (var doc in onlineSnap.docs) {
-        final ad = doc.data()['ad'] as String? ?? '';
-        final pulseAdi = doc.data()['pulseAdi'] as String? ?? '';
-        if (pulseAdi.isEmpty) continue;
-        final deger = degerBul(pulseAdi);
-        if (deger != null) okunan[ad] = deger;
+      if (geminiOkunan['brutsatis'] != null) {
+        okunan['__gunlukSatis__'] =
+            (geminiOkunan['brutsatis'] as num).toDouble();
       }
-
-      // Brüt Satış → Günlük Satış
-      final brutSatis = degerBul('Brüt Satis') ??
-          degerBul('Brut Satis') ??
-          degerBul('BRUT SATIS') ??
-          degerBul('Genel Toplam');
-      if (brutSatis != null) okunan['__gunlukSatis__'] = brutSatis;
-
-      // Banka Parası → Ekranda Görünen Nakit
-      final bankaPara = degerBul('Banka Parasi') ??
-          degerBul('Banka Parası') ??
-          degerBul('BANKA PARASI');
-      if (bankaPara != null) okunan['__ekrandaNakit__'] = bankaPara;
+      if (geminiOkunan['bankapara'] != null) {
+        okunan['__ekrandaNakit__'] =
+            (geminiOkunan['bankapara'] as num).toDouble();
+      }
+      if (geminiOkunan['online'] != null) {
+        for (final o in (geminiOkunan['online'] as List)) {
+          final ad = o['ad'] as String? ?? '';
+          final tutar = (o['tutar'] as num? ?? 0).toDouble();
+          if (ad.isNotEmpty && tutar > 0) okunan[ad] = tutar;
+        }
+      }
 
       if (okunan.isEmpty) {
         if (mounted) {
