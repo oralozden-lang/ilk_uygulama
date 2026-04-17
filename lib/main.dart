@@ -2379,8 +2379,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                         ),
                       // aktiviteLog — Günü Kapat ve Düzenlemeyi Aç geçmişi
                       ...() {
-                        final log =
-                            (d['aktiviteLog'] as List?)?.cast<Map>() ?? [];
+                        final log = (d['aktiviteLog'] as List?)?.cast<Map>() ?? [];
                         if (log.isEmpty) return <Widget>[];
                         return log.map((e) {
                           final islem = e['islem'] as String? ?? '';
@@ -3653,9 +3652,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       'sistemPos': _parseDouble(_sistemPosCtrl.text),
       'yemekKartlari': _yemekKartlari
           .map((y) => {
-                'cins': y.cins,
-                'tutar': _parseDouble(y.tutarCtrl.text),
-              })
+            'cins': y.cins,
+            'tutar': _parseDouble(y.tutarCtrl.text),
+          })
           .toList(),
       'sistemYemekKartlari': {
         for (var c in _yemekKartiCinsleri)
@@ -3663,10 +3662,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       },
       'onlineOdemeler': _onlineOdemeler
           .map((o) => {
-                'ad': o['ad'],
-                'tutar':
-                    _parseDouble((o['ctrl'] as TextEditingController).text),
-              })
+            'ad': o['ad'],
+            'tutar': _parseDouble((o['ctrl'] as TextEditingController).text),
+          })
           .toList(),
       'gunlukSatisToplami': _parseDouble(_gunlukSatisCtrl.text),
       'harcamalar': _harcamalar
@@ -4043,8 +4041,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content:
-                  Text('Resimden metin okunamadı. Daha net bir resim deneyin.'),
+              content: Text('Resimden metin okunamadı. Daha net bir resim deneyin.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -4122,8 +4119,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                  'Eşleşen veri bulunamadı. Pulse ekranı net çekilmiş mi?'),
+              content: Text('Eşleşen veri bulunamadı. Pulse ekranı net çekilmiş mi?'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -4164,7 +4160,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(
-                          child: Text(ad, style: const TextStyle(fontSize: 13)),
+                          child: Text(ad,
+                              style: const TextStyle(fontSize: 13)),
                         ),
                         Text(
                           _formatTL(e.value),
@@ -4703,9 +4700,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           .collection('bekleyen_transferler')
           .get();
 
-      // Sadece GELEN (bekletilmiş dahil) göster
+      // GELEN ve bekletilmiş RET'leri göster
       final aktifler = bekleyenler.docs
-          .where((d) => d.data()['kategori'] == 'GELEN')
+          .where((d) =>
+              d.data()['kategori'] == 'GELEN' ||
+              (d.data()['kategori'] == 'RET' && d.data()['bekletildi'] == true))
           .toList();
 
       if (!mounted) return;
@@ -4728,7 +4727,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     itemCount: aktifler.length,
                     itemBuilder: (_, i) {
                       final d = aktifler[i].data();
-                      final kaynakAd = d['kaynakSubeAd'] as String? ?? '';
+                      final kategori = d['kategori'] as String? ?? 'GELEN';
+                      final isRet = kategori == 'RET';
+                      final kaynakAd = isRet
+                          ? (d['hedefSubeAd'] as String? ?? '')
+                          : (d['kaynakSubeAd'] as String? ?? '');
                       final tutar = (d['tutar'] as num? ?? 0).toDouble();
                       final tarih = d['tarih'] as String? ?? '';
                       final aciklama = d['aciklama'] as String? ?? '';
@@ -4736,15 +4739,18 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       return ListTile(
                         dense: true,
                         leading: Icon(
-                          bekletildi ? Icons.hourglass_empty : Icons.pending,
-                          color: bekletildi ? Colors.orange : Colors.blue,
+                          isRet ? Icons.cancel_outlined : (bekletildi ? Icons.hourglass_empty : Icons.pending),
+                          color: isRet ? Colors.red[700] : (bekletildi ? Colors.orange : Colors.blue),
                         ),
-                        title: Text('$kaynakAd → ${_formatTL(tutar)}'),
+                        title: Text(isRet
+                            ? '$kaynakAd — Reddedildi'
+                            : '$kaynakAd → ${_formatTL(tutar)}'),
                         subtitle: Text(
                           [
+                            if (isRet) _formatTL(tutar),
                             tarih,
                             if (aciklama.isNotEmpty) aciklama,
-                            if (bekletildi) 'Bekletildi',
+                            if (bekletildi && !isRet) 'Bekletildi',
                           ].join(' • '),
                         ),
                         trailing: TextButton(
@@ -4822,25 +4828,172 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       if (!mounted) return;
 
       // RET — transfer reddedildi, GİDEN kaydı güncelle (tekrar gönderilebilir)
+      // bekletildi=true olanları atla — kullanıcı daha sonra bakmak istiyor
       for (final doc in bekleyenler.docs.where(
-        (d) => d.data()['kategori'] == 'RET',
+        (d) => d.data()['kategori'] == 'RET' && d.data()['bekletildi'] != true,
       )) {
         if (!mounted) break;
         final data = doc.data();
         final transferId = data['transferId'] as String? ?? '';
+        final retTarih = data['tarih'] as String? ?? '';
+        final retTutar = (data['tutar'] as num? ?? 0).toDouble();
+        final retHedefAd = data['hedefSubeAd'] as String? ?? '';
         await doc.reference.delete();
         if (transferId.isNotEmpty) {
-          setState(() {
-            for (final t in _transferler) {
-              if ((t['transferId'] as String? ?? '') == transferId) {
-                t['reddedildi'] = true;
-                t['onaylandi'] = false;
-                t['bekletildi'] = false;
-                t['gonderildi'] = false;
+          // A'ya dialog ile bildir — reddedildi henüz set edilmez
+          if (mounted && retTarih.isNotEmpty) {
+            final sonuc = await showDialog<String>(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => AlertDialog(
+                title: Row(
+                  children: [
+                    Icon(Icons.cancel_outlined, color: Colors.red[700]),
+                    const SizedBox(width: 8),
+                    const Flexible(child: Text('Transfer Reddedildi')),
+                  ],
+                ),
+                content: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red[200]!),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Reddeden Şube:',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                      Text(
+                        retHedefAd,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tutar:',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                      Text(
+                        _formatTL(retTutar),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
+                          color: Colors.red[700],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tarih: $retTarih',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton.icon(
+                    onPressed: () => Navigator.pop(context, 'beklet'),
+                    icon: Icon(Icons.hourglass_empty, color: Colors.orange[700]),
+                    label: Text('Beklet', style: TextStyle(color: Colors.orange[700])),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => Navigator.pop(context, 'goruntule'),
+                    icon: const Icon(Icons.visibility, color: Color(0xFF0288D1)),
+                    label: const Text('Görüntüle', style: TextStyle(color: Color(0xFF0288D1))),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(context, 'dogru'),
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('Tamam, Kapat'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green[700],
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            );
+            if (sonuc == 'goruntule' && mounted) {
+              // Sadece o tarihe git — reddedildi henüz set edilmez
+              final parcalar = retTarih.split('-');
+              if (parcalar.length == 3) {
+                final tarih = DateTime(
+                  int.tryParse(parcalar[0]) ?? 2000,
+                  int.tryParse(parcalar[1]) ?? 1,
+                  int.tryParse(parcalar[2]) ?? 1,
+                );
+                await _kilitBirak();
+                setState(() {
+                  _secilenTarih = tarih;
+                  _degisiklikVar = false;
+                });
+                await _mevcutKaydiYukleYaDaTemizle();
+              }
+            } else if (sonuc == 'beklet' && mounted) {
+              // Rozette göster, sonra tekrar işlenebilir
+              await FirebaseFirestore.instance
+                  .collection('subeler')
+                  .doc(widget.subeKodu)
+                  .collection('bekleyen_transferler')
+                  .doc('ret_beklet_$transferId')
+                  .set({
+                'kategori': 'RET',
+                'hedefSubeAd': retHedefAd,
+                'tutar': retTutar,
+                'tarih': retTarih,
+                'transferId': transferId,
+                'bekletildi': true,
+                'zaman': FieldValue.serverTimestamp(),
+              });
+              setState(() => _bekleyenTransferSayisi++);
+            } else if (sonuc == 'dogru' && mounted) {
+              // Doğru seçilince reddedildi olarak Firestore'a yaz
+              bool eslesti = false;
+              setState(() {
+                for (final t in _transferler) {
+                  if ((t['transferId'] as String? ?? '') == transferId) {
+                    t['reddedildi'] = true;
+                    t['onaylandi'] = false;
+                    t['bekletildi'] = false;
+                    t['gonderildi'] = false;
+                    eslesti = true;
+                  }
+                }
+              });
+              if (eslesti) {
+                await _transferKaydet();
+              } else if (retTarih.isNotEmpty) {
+                try {
+                  final gunRef = FirebaseFirestore.instance
+                      .collection('subeler')
+                      .doc(widget.subeKodu)
+                      .collection('gunluk')
+                      .doc(retTarih);
+                  final gunDoc = await gunRef.get();
+                  if (gunDoc.exists) {
+                    final transferler =
+                        (gunDoc.data()?['transferler'] as List?)?.cast<Map>() ?? [];
+                    final guncel = transferler.map((t) {
+                      if ((t['transferId'] as String? ?? '') == transferId) {
+                        return {
+                          ...t,
+                          'reddedildi': true,
+                          'onaylandi': false,
+                          'bekletildi': false,
+                          'gonderildi': false,
+                        };
+                      }
+                      return t;
+                    }).toList();
+                    await gunRef.update({'transferler': guncel});
+                  }
+                } catch (_) {}
               }
             }
-          });
-          await _transferKaydet();
+          }
         }
       }
 
@@ -4999,7 +5152,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         if (sonuc == 'onayla') {
           await _transferiKaydeEkle(doc.id, data);
         } else if (sonuc == 'red') {
-          await _transferiReddet(doc.id, data, transferId: transferId);
+          await _transferiReddetVeKaydet(doc.id, data, transferId: transferId);
         } else if (sonuc == 'beklet') {
           // Beklet: Firestoreda bekletildi=true yap, bildirimi alacak şubeye gönder
           await doc.reference.update({
@@ -5185,9 +5338,171 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         if (sonuc == 'onayla') {
           await _transferiKaydeEkle(doc.id, data);
         } else if (sonuc == 'red') {
-          await _transferiReddet(doc.id, data, transferId: transferId);
+          await _transferiReddetVeKaydet(doc.id, data, transferId: transferId);
         }
         // beklet → hiçbir şey yapma, Firestoreda bekletildi=true kalır
+      }
+
+      if (!mounted) return;
+
+      // ── 4. Bekletilmiş RET bildirimleri: tekrar isle ──────────────────────
+      final retBekletilmisler = bekleyenler.docs
+          .where((d) =>
+              d.data()['kategori'] == 'RET' && d.data()['bekletildi'] == true)
+          .toList();
+
+      for (final doc in retBekletilmisler) {
+        if (!mounted) return;
+        final data = doc.data();
+        final transferId = data['transferId'] as String? ?? '';
+        final retTarih = data['tarih'] as String? ?? '';
+        final retTutar = (data['tutar'] as num? ?? 0).toDouble();
+        final retHedefAd = data['hedefSubeAd'] as String? ?? '';
+
+        await doc.reference.delete();
+
+        final sonuc = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.cancel_outlined, color: Colors.red[700]),
+                const SizedBox(width: 8),
+                const Flexible(child: Text('Transfer Reddedildi')),
+              ],
+            ),
+            content: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[200]!),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Reddeden Sube:',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                  Text(retHedefAd,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  Text('Tutar:',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                  Text(_formatTL(retTutar),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
+                          color: Colors.red[700])),
+                  const SizedBox(height: 8),
+                  Text('Tarih: $retTarih',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton.icon(
+                onPressed: () => Navigator.pop(context, 'beklet'),
+                icon: Icon(Icons.hourglass_empty, color: Colors.orange[700]),
+                label: Text('Beklet',
+                    style: TextStyle(color: Colors.orange[700])),
+              ),
+              TextButton.icon(
+                onPressed: () => Navigator.pop(context, 'goruntule'),
+                icon: const Icon(Icons.visibility, color: Color(0xFF0288D1)),
+                label: const Text('Goruntule',
+                    style: TextStyle(color: Color(0xFF0288D1))),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, 'tamam'),
+                icon: const Icon(Icons.check_circle),
+                label: const Text('Tamam, Kapat'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green[700],
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (sonuc == 'goruntule' && mounted) {
+          final parcalar = retTarih.split('-');
+          if (parcalar.length == 3) {
+            final tarih = DateTime(
+              int.tryParse(parcalar[0]) ?? 2000,
+              int.tryParse(parcalar[1]) ?? 1,
+              int.tryParse(parcalar[2]) ?? 1,
+            );
+            await _kilitBirak();
+            setState(() {
+              _secilenTarih = tarih;
+              _degisiklikVar = false;
+            });
+            await _mevcutKaydiYukleYaDaTemizle();
+          }
+        } else if (sonuc == 'beklet' && mounted) {
+          await FirebaseFirestore.instance
+              .collection('subeler')
+              .doc(widget.subeKodu)
+              .collection('bekleyen_transferler')
+              .doc('ret_beklet_$transferId')
+              .set({
+            'kategori': 'RET',
+            'hedefSubeAd': retHedefAd,
+            'tutar': retTutar,
+            'tarih': retTarih,
+            'transferId': transferId,
+            'bekletildi': true,
+            'zaman': FieldValue.serverTimestamp(),
+          });
+          setState(() => _bekleyenTransferSayisi++);
+        } else if (sonuc == 'tamam' && mounted) {
+          // Reddedildi olarak Firestore'a yaz
+          bool eslesti = false;
+          setState(() {
+            for (final t in _transferler) {
+              if ((t['transferId'] as String? ?? '') == transferId) {
+                t['reddedildi'] = true;
+                t['onaylandi'] = false;
+                t['bekletildi'] = false;
+                t['gonderildi'] = false;
+                eslesti = true;
+              }
+            }
+          });
+          if (eslesti) {
+            await _transferKaydet();
+          } else if (retTarih.isNotEmpty) {
+            try {
+              final gunRef = FirebaseFirestore.instance
+                  .collection('subeler')
+                  .doc(widget.subeKodu)
+                  .collection('gunluk')
+                  .doc(retTarih);
+              final gunDoc = await gunRef.get();
+              if (gunDoc.exists) {
+                final transferler =
+                    (gunDoc.data()?['transferler'] as List?)?.cast<Map>() ?? [];
+                final guncel = transferler.map((t) {
+                  if ((t['transferId'] as String? ?? '') == transferId) {
+                    return {
+                      ...t,
+                      'reddedildi': true,
+                      'onaylandi': false,
+                      'bekletildi': false,
+                      'gonderildi': false,
+                    };
+                  }
+                  return t;
+                }).toList();
+                await gunRef.update({'transferler': guncel});
+              }
+            } catch (_) {}
+          }
+        }
       }
     } catch (_) {
     } finally {
@@ -5417,6 +5732,111 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   }
 
   // Reddedilen transferi işle
+  // B şubesi red edince: bekleyen_transferlerdan sil, B'nin günlük kaydına reddedildi olarak ekle
+  Future<void> _transferiReddetVeKaydet(
+    String docId,
+    Map<String, dynamic> transferData, {
+    String transferId = '',
+  }) async {
+    try {
+      final tarihKey = transferData['tarih'] as String? ?? _tarihKey(_secilenTarih);
+      final kaynakSube = transferData['kaynakSube'] as String? ?? '';
+      final kaynakSubeAd = transferData['kaynakSubeAd'] as String? ?? '';
+      final tutar = (transferData['tutar'] as num? ?? 0).toDouble();
+      final aciklama = transferData['aciklama'] as String? ?? '';
+      final manuelGelen = transferData['manuelGelen'] == true;
+
+      // B'nin günlük kaydına reddedildi transferi ekle
+      final subeRef = FirebaseFirestore.instance
+          .collection('subeler')
+          .doc(widget.subeKodu)
+          .collection('gunluk')
+          .doc(tarihKey);
+
+      final mevcut = await subeRef.get();
+      final mevcutTransferler = mevcut.exists
+          ? (mevcut.data()?['transferler'] as List?)?.cast<Map>() ?? []
+          : [];
+
+      // Aynı transferId zaten eklenmişse ekleme
+      final zatenVar = mevcutTransferler.any(
+        (t) => (t['transferId'] as String? ?? '') == transferId,
+      );
+
+      if (!zatenVar) {
+        final yeniTransfer = {
+          'kategori': manuelGelen ? 'GİDEN' : 'GELEN',
+          'kaynakSube': kaynakSube,
+          'kaynakSubeAd': kaynakSubeAd,
+          'hedefSube': widget.subeKodu,
+          'hedefSubeAd': _subeAdlari[widget.subeKodu] ?? widget.subeKodu,
+          'aciklama': aciklama,
+          'tutar': tutar,
+          'gonderildi': true,
+          'onaylandi': false,
+          'reddedildi': true,
+          'bekletildi': false,
+          'transferId': transferId,
+          'onayDocId': '',
+        };
+        final guncelTransferler = [...mevcutTransferler, yeniTransfer];
+        if (mevcut.exists) {
+          await subeRef.update({'transferler': guncelTransferler});
+        } else {
+          await subeRef.set({
+            'tarih': tarihKey,
+            'subeKodu': widget.subeKodu,
+            'transferler': guncelTransferler,
+          }, SetOptions(merge: true));
+        }
+      }
+
+      // Bekleyen transferi sil
+      await FirebaseFirestore.instance
+          .collection('subeler')
+          .doc(widget.subeKodu)
+          .collection('bekleyen_transferler')
+          .doc(docId)
+          .delete();
+
+      // A'ya RET bildirimi gönder
+      final bildirimAlacakSube = manuelGelen
+          ? (transferData['hedefSube'] as String? ?? '')
+          : kaynakSube;
+
+      if (bildirimAlacakSube.isNotEmpty) {
+        final retId = transferId.isNotEmpty ? 'ret_$transferId' : null;
+        final retRef = retId != null
+            ? FirebaseFirestore.instance
+                .collection('subeler')
+                .doc(bildirimAlacakSube)
+                .collection('bekleyen_transferler')
+                .doc(retId)
+            : FirebaseFirestore.instance
+                .collection('subeler')
+                .doc(bildirimAlacakSube)
+                .collection('bekleyen_transferler')
+                .doc();
+        await retRef.set({
+          'kategori': 'RET',
+          'hedefSube': widget.subeKodu,
+          'hedefSubeAd': _subeAdlari[widget.subeKodu] ?? widget.subeKodu,
+          'aciklama': aciklama,
+          'tutar': tutar,
+          'tarih': tarihKey,
+          'transferId': transferId,
+          'zaman': FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (mounted) {
+        setState(() {
+          if (_bekleyenTransferSayisi > 0) _bekleyenTransferSayisi--;
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _transferiReddet(
     String docId,
     Map<String, dynamic> transferData, {
@@ -6056,6 +6476,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       _yemekKartiCinsToplam(cins) -
       _parseDouble(_sistemYemekKartiCtrl[cins]?.text ?? '');
 
+
   double get _toplamHarcama {
     double t = 0;
     for (var h in _harcamalar) t += _parseDouble(h.tutarCtrl.text);
@@ -6389,8 +6810,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('İptal',
-                        style: TextStyle(color: Colors.red)),
+                    child: const Text('İptal', style: TextStyle(color: Colors.red)),
                   ),
                   FilledButton(
                     onPressed: () => Navigator.pop(ctx, true),
@@ -6403,8 +6823,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             // Değerleri Firestore'daki doğru değerlerle güncelle
             setState(() {
               _oncekiAnaKasaKalani = oncekiAnaKasa;
-              _devredenFlotCtrl.text =
-                  _formatTL(oncekiFlot).replaceAll(' ₺', '');
+              _devredenFlotCtrl.text = _formatTL(oncekiFlot).replaceAll(' ₺', '');
               _otomatikDevredenFlot = oncekiFlot;
               for (var t in _dovizTurleri) {
                 _devredenDovizMiktarlari[t] =
@@ -6417,6 +6836,57 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       } catch (_) {
         // Kontrol başarısız olursa sessizce devam et
       }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Bekletilmiş RET bildirimi varsa uyar ────────────────────────────────
+    if (mounted) {
+      try {
+        final retBekleyen = await FirebaseFirestore.instance
+            .collection('subeler')
+            .doc(widget.subeKodu)
+            .collection('bekleyen_transferler')
+            .where('kategori', isEqualTo: 'RET')
+            .where('bekletildi', isEqualTo: true)
+            .get();
+        if (retBekleyen.docs.isNotEmpty && mounted) {
+          final devamEt = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Flexible(child: Text('Bekletilmiş Transfer Bildirimi')),
+                ],
+              ),
+              content: Text(
+                '${retBekleyen.docs.length} adet bekletilmis transfer red bildirimi var.\n\n'
+                'Bunlari islemeden gunu kapatmak ister misiniz?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('İptal', style: TextStyle(color: Colors.red)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx, false);
+                    _bekleyenTransferleriGoster();
+                  },
+                  child: const Text('Bildirimleri Gör'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Yine de Kapat'),
+                ),
+              ],
+            ),
+          );
+          if (devamEt != true) return;
+        }
+      } catch (_) {}
     }
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -6442,9 +6912,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         'sistemPos': _parseDouble(_sistemPosCtrl.text),
         'yemekKartlari': _yemekKartlari
             .map((y) => {
-                  'cins': y.cins,
-                  'tutar': _parseDouble(y.tutarCtrl.text),
-                })
+              'cins': y.cins,
+              'tutar': _parseDouble(y.tutarCtrl.text),
+            })
             .toList(),
         'sistemYemekKartlari': {
           for (var c in _yemekKartiCinsleri)
@@ -6452,10 +6922,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         },
         'onlineOdemeler': _onlineOdemeler
             .map((o) => {
-                  'ad': o['ad'],
-                  'tutar':
-                      _parseDouble((o['ctrl'] as TextEditingController).text),
-                })
+              'ad': o['ad'],
+              'tutar': _parseDouble((o['ctrl'] as TextEditingController).text),
+            })
             .toList(),
         'gunlukSatisToplami': _parseDouble(_gunlukSatisCtrl.text),
         'posFarki': _posFarki,
@@ -7798,15 +8267,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             // Cins bazlı toplam + Pulse karşılaştırması
             ...() {
               final cinsler = _yemekKartiCinsleri
-                  .where((c) =>
-                      _yemekKartiCinsToplam(c) > 0 ||
+                  .where((c) => _yemekKartiCinsToplam(c) > 0 ||
                       (_sistemYemekKartiCtrl[c]?.text.isNotEmpty == true))
                   .toList();
               return cinsler.map((cins) {
                 final toplam = _yemekKartiCinsToplam(cins);
                 final fark = _yemekKartiFarki(cins);
-                final farkRenk =
-                    fark.abs() < 0.02 ? Colors.green[700]! : Colors.red[700]!;
+                final farkRenk = fark.abs() < 0.02
+                    ? Colors.green[700]!
+                    : Colors.red[700]!;
                 final cinsRenk = _yemekKartiRenk(cins);
                 return Column(
                   children: [
@@ -7890,7 +8359,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             }(),
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: const Color(0xFF6A1B9A).withOpacity(0.07),
                 borderRadius: BorderRadius.circular(8),
@@ -8147,13 +8617,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 OutlinedButton.icon(
                   onPressed: _readOnly ? null : _pulseResmiOku,
                   icon: const Icon(Icons.camera_alt_outlined, size: 16),
-                  label:
-                      const Text('Pulse Resmi', style: TextStyle(fontSize: 12)),
+                  label: const Text('Pulse Resmi', style: TextStyle(fontSize: 12)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF0288D1),
                     side: const BorderSide(color: Color(0xFF0288D1)),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   ),
                 ),
               ],
@@ -8311,8 +8779,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             // Otomatik hesaplanan
             if (hesaplanan > 0) ...[
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.amber[50],
                   borderRadius: BorderRadius.circular(8),
@@ -8323,13 +8790,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.calculate_outlined,
-                            size: 16, color: Colors.amber[700]),
+                        Icon(Icons.calculate_outlined, size: 16, color: Colors.amber[700]),
                         const SizedBox(width: 6),
                         Text(
                           'Hesaplanan Nakit',
-                          style:
-                              TextStyle(fontSize: 13, color: Colors.amber[800]),
+                          style: TextStyle(fontSize: 13, color: Colors.amber[800]),
                         ),
                       ],
                     ),
@@ -8357,8 +8822,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     _otomatikKaydetBaslat();
                   },
                   icon: const Icon(Icons.auto_fix_high, size: 16),
-                  label: const Text('Otomatik Doldur',
-                      style: TextStyle(fontSize: 12)),
+                  label: const Text('Otomatik Doldur', style: TextStyle(fontSize: 12)),
                 ),
               const SizedBox(height: 4),
             ],
@@ -8390,8 +8854,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     vertical: 10,
                   ),
                 ),
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 textInputAction: TextInputAction.next,
                 inputFormatters: [BinAraciFormatter()],
                 onChanged: (_) => setState(() {
@@ -9677,14 +10140,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               ),
             ),
           ),
-          if (reddedildi)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Karşı şube reddetti — düzenleyip tekrar gönderebilirsiniz',
-                style: TextStyle(color: Colors.red[700], fontSize: 11),
-              ),
-            ),
         ],
         // GELEN — Bildir butonu (Gönder ile aynı mantık, sadece isim farklı)
         // Reddedildiyse: aktif "Tekrar Bildir" butonu
@@ -9735,24 +10190,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               ),
             ),
           ),
-          if (reddedildi)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Karşı şube reddetti — düzenleyip tekrar bildirebilirsiniz',
-                style: TextStyle(color: Colors.red[700], fontSize: 11),
-              ),
-            ),
+
         ],
 
-        if (kategori == 'GELEN' && reddedildi)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              'Karşı şube bu transferi reddetti',
-              style: TextStyle(color: Colors.red[700], fontSize: 11),
-            ),
-          ),
+
       ],
     );
   }
@@ -12123,15 +12564,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                           .collection('gunluk')
                                           .doc(_tarihKey(_secilenTarih))
                                           .update({
-                                        'tamamlandi': false,
-                                        'aktiviteLog': FieldValue.arrayUnion([
-                                          {
-                                            'islem': 'Düzenlemeyi Aç',
-                                            'kullanici': _mevcutKullanici,
-                                            'zaman': Timestamp.now(),
-                                          }
-                                        ]),
-                                      });
+                                            'tamamlandi': false,
+                                            'aktiviteLog': FieldValue.arrayUnion([
+                                              {
+                                                'islem': 'Düzenlemeyi Aç',
+                                                'kullanici': _mevcutKullanici,
+                                                'zaman': Timestamp.now(),
+                                              }
+                                            ]),
+                                          });
                                       if (mounted) {
                                         setState(() {
                                           _gunuKapatildi = false;
@@ -14443,8 +14884,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
   Future<void> _ekleDialog({Map<String, dynamic>? mevcut}) async {
     final adCtrl = TextEditingController(text: mevcut?['ad'] ?? '');
     final pulseCtrl = TextEditingController(text: mevcut?['pulseAdi'] ?? '');
-    final digerCtrl =
-        TextEditingController(text: mevcut?['digerEkranAdi'] ?? '');
+    final digerCtrl = TextEditingController(text: mevcut?['digerEkranAdi'] ?? '');
     String tip = mevcut?['tip'] ?? 'yemekKarti';
     bool aktif = mevcut?['aktif'] ?? true;
 
@@ -14460,32 +14900,27 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
               children: [
                 TextFormField(
                   controller: adCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Ad *', isDense: true),
+                  decoration: const InputDecoration(labelText: 'Ad *', isDense: true),
                   inputFormatters: [IlkHarfBuyukFormatter()],
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: pulseCtrl,
-                  decoration: const InputDecoration(
-                      labelText: "Pulse'daki adı", isDense: true),
+                  decoration: const InputDecoration(labelText: "Pulse'daki adı", isDense: true),
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: digerCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Diğer ekrandaki adı', isDense: true),
+                  decoration: const InputDecoration(labelText: 'Diğer ekrandaki adı', isDense: true),
                 ),
                 const SizedBox(height: 12),
-                const Text('Tip',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text('Tip', style: TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 4),
                 Row(
                   children: [
                     Expanded(
                       child: RadioListTile<String>(
-                        title: const Text('Yemek Kartı',
-                            style: TextStyle(fontSize: 13)),
+                        title: const Text('Yemek Kartı', style: TextStyle(fontSize: 13)),
                         value: 'yemekKarti',
                         groupValue: tip,
                         dense: true,
@@ -14494,8 +14929,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                     ),
                     Expanded(
                       child: RadioListTile<String>(
-                        title: const Text('Online',
-                            style: TextStyle(fontSize: 13)),
+                        title: const Text('Online', style: TextStyle(fontSize: 13)),
                         value: 'online',
                         groupValue: tip,
                         dense: true,
@@ -14536,9 +14970,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                       .doc(mevcut['id'] as String)
                       .update(veri);
                 } else {
-                  await FirebaseFirestore.instance
-                      .collection(_koleksiyon)
-                      .add(veri);
+                  await FirebaseFirestore.instance.collection(_koleksiyon).add(veri);
                 }
                 if (ctx.mounted) Navigator.pop(ctx);
                 await _yukle();
@@ -14594,8 +15026,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                     children: [
                       Text(
                         'Ödeme Yöntemleri',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 15),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                       SizedBox(height: 4),
                       Text(
@@ -14607,8 +15038,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                 ),
                 IconButton(
                   onPressed: () => _ekleDialog(),
-                  icon: const Icon(Icons.add_circle_outline,
-                      color: Color(0xFF0288D1)),
+                  icon: const Icon(Icons.add_circle_outline, color: Color(0xFF0288D1)),
                   tooltip: 'Yeni ekle',
                 ),
               ],
@@ -14639,8 +15069,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                 final tipYazi = tip == 'online' ? 'Online' : 'Yemek Kartı';
                 return Container(
                   margin: const EdgeInsets.only(bottom: 6),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: aktif
                         ? Colors.grey.withOpacity(0.06)
@@ -14666,33 +15095,27 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                                 ),
                                 const SizedBox(width: 8),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: tipRenk.withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
                                     tipYazi,
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color: tipRenk,
-                                        fontWeight: FontWeight.w600),
+                                    style: TextStyle(fontSize: 10, color: tipRenk, fontWeight: FontWeight.w600),
                                   ),
                                 ),
                                 if (!aktif) ...[
                                   const SizedBox(width: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
                                       color: Colors.grey.withOpacity(0.15),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: const Text(
                                       'Pasif',
-                                      style: TextStyle(
-                                          fontSize: 10, color: Colors.grey),
+                                      style: TextStyle(fontSize: 10, color: Colors.grey),
                                     ),
                                   ),
                                 ],
@@ -14703,8 +15126,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                                 padding: const EdgeInsets.only(top: 2),
                                 child: Text(
                                   'Pulse: $pulseAdi',
-                                  style: TextStyle(
-                                      fontSize: 11, color: Colors.grey[500]),
+                                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                                 ),
                               ),
                             if (digerAdi.isNotEmpty)
@@ -14712,24 +15134,21 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                                 padding: const EdgeInsets.only(top: 1),
                                 child: Text(
                                   'Diğer: $digerAdi',
-                                  style: TextStyle(
-                                      fontSize: 11, color: Colors.grey[500]),
+                                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                                 ),
                               ),
                           ],
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.edit_outlined,
-                            size: 18, color: Color(0xFF0288D1)),
+                        icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF0288D1)),
                         onPressed: () => _ekleDialog(mevcut: item),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline,
-                            size: 18, color: Colors.redAccent),
+                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
                         onPressed: () => _sil(item['id'] as String),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
@@ -19851,18 +20270,18 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   final bgRenk = t == 'USD'
                       ? PdfColors.orange50
                       : t == 'EUR'
-                          ? PdfColors.purple50
-                          : PdfColors.teal50;
+                      ? PdfColors.purple50
+                      : PdfColors.teal50;
                   final yaziRenk = t == 'USD'
                       ? PdfColors.orange800
                       : t == 'EUR'
-                          ? PdfColors.purple800
-                          : PdfColors.teal800;
+                      ? PdfColors.purple800
+                      : PdfColors.teal800;
                   final kalanRenk = t == 'USD'
                       ? PdfColors.deepOrange700
                       : t == 'EUR'
-                          ? PdfColors.purple700
-                          : PdfColors.teal700;
+                      ? PdfColors.purple700
+                      : PdfColors.teal700;
 
                   final sembol = dovizSembolleri[t] ?? t;
                   final kalan = (dovizKalanlar?[t] as num?)?.toDouble() ?? 0;
@@ -20864,18 +21283,18 @@ class _OzetEkraniState extends State<OzetEkrani> {
                 final bgRenk = t == 'USD'
                     ? Colors.orange[50]!
                     : t == 'EUR'
-                        ? Colors.purple[50]!
-                        : Colors.teal[50]!;
+                    ? Colors.purple[50]!
+                    : Colors.teal[50]!;
                 final yaziRenk = t == 'USD'
                     ? Colors.orange[800]!
                     : t == 'EUR'
-                        ? Colors.purple[800]!
-                        : Colors.teal[800]!;
+                    ? Colors.purple[800]!
+                    : Colors.teal[800]!;
                 final kalanRenk = t == 'USD'
                     ? Colors.deepOrange[700]!
                     : t == 'EUR'
-                        ? Colors.purple[700]!
-                        : Colors.teal[700]!;
+                    ? Colors.purple[700]!
+                    : Colors.teal[700]!;
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
