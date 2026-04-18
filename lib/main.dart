@@ -3089,7 +3089,8 @@ class OnHazirlikEkrani extends StatefulWidget {
 }
 
 class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, TickerProviderStateMixin {
+  late TabController _tabController;
   DateTime _secilenTarih = DateTime.now();
   Map<String, String> _subeAdlari = {}; // subeId -> subeAdi
 
@@ -3098,6 +3099,12 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   final Map<String, TextEditingController> _sistemYemekKartiCtrl = {};
   List<String> _yemekKartiCinsleri = []; // Firestore'dan yüklenir
   List<Map<String, dynamic>> _onlineOdemeler = []; // {ad, ctrl}
+  Map<String, double> _myDominosOkunan = {}; // My Dominos okunan veriler
+  bool _myDominosYuklendi = false;
+  bool _myDominosOkunuyor = false;
+  final Map<String, TextEditingController> _pulseKiyasCtrl =
+      {}; // Pulse manuel giriş
+  List<Map<String, dynamic>> _pulseKalemleri = []; // tip: pulseKalemi
   List<String> _onlineOdemeAdlari = []; // Firestore'dan yüklenir
   final TextEditingController _sistemPosCtrl = TextEditingController();
   final TextEditingController _gunlukSatisCtrl = TextEditingController();
@@ -3171,6 +3178,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 6, vsync: this);
     _banknotlariYukle();
     _giderTurleriYukle();
     _yemekKartiCinsleriniYukle();
@@ -4011,6 +4019,446 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     } catch (_) {}
   }
 
+  // ── Pulse / My Dominos Kıyas Sekmesi ─────────────────────────────────────────
+
+  Widget _pulseKiyasSekmesi() {
+    // Tüm kalemleri Pulse sırasına göre hazırla
+    // POS kalemi — sıra 1 (sabit)
+    final posToplamiVal = _posListesi.fold<double>(
+      0,
+      (sum, p) => sum + _parseDouble(p.tutarCtrl.text),
+    );
+    final brutSatis = _parseDouble(_gunlukSatisCtrl.text);
+
+    // Online ödemeleri pulseSira'ya göre sırala
+    final siraliOnline = List<Map<String, dynamic>>.from(_onlineOdemeler)
+      ..sort((a, b) {
+        final sa = (a['pulseSira'] as int? ?? 99);
+        final sb = (b['pulseSira'] as int? ?? 99);
+        return sa.compareTo(sb);
+      });
+
+    // Tüm kalemlerin toplamını hesapla (Banka Parası için)
+    double toplamKalemlerVal = posToplamiVal;
+    for (final o in _onlineOdemeler) {
+      toplamKalemlerVal +=
+          _parseDouble((o['ctrl'] as TextEditingController).text);
+    }
+    for (var c in _yemekKartlari) {
+      toplamKalemlerVal += _parseDouble(c.tutarCtrl.text);
+    }
+    final bankaParasi = brutSatis - toplamKalemlerVal;
+
+    // Pulse kıyas controller'ı hazırla
+    for (final o in siraliOnline) {
+      final ad = o['ad'] as String;
+      _pulseKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
+    }
+    _pulseKiyasCtrl.putIfAbsent('__pos__', () => TextEditingController());
+
+    Widget _kiyasSatiri({
+      required String etiket,
+      required double programVal,
+      required String kiyasKey,
+      bool readOnly = false,
+    }) {
+      final ctrl = _pulseKiyasCtrl[kiyasKey]!;
+      final pulseVal = _parseDouble(ctrl.text);
+      final fark = programVal - pulseVal;
+      final eslesme = ctrl.text.isEmpty ? false : fark.abs() < 0.01;
+      final farkVar = ctrl.text.isNotEmpty && !eslesme;
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: ctrl.text.isEmpty
+              ? Colors.grey[50]
+              : eslesme
+                  ? Colors.green[50]
+                  : Colors.red[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: ctrl.text.isEmpty
+                ? Colors.grey[200]!
+                : eslesme
+                    ? Colors.green[200]!
+                    : Colors.red[200]!,
+          ),
+        ),
+        child: Row(
+          children: [
+            // Etiket
+            Expanded(
+              flex: 3,
+              child: Text(
+                etiket,
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            ),
+            // Program değeri
+            Expanded(
+              flex: 3,
+              child: Text(
+                programVal > 0 ? _formatTL(programVal) : '0,00 ₺',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            // Pulse değeri (manuel giriş)
+            SizedBox(
+              width: 80,
+              child: TextField(
+                controller: ctrl,
+                enabled: !_readOnly,
+                textAlign: TextAlign.right,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [BinAraciFormatter()],
+                style: const TextStyle(fontSize: 12),
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  hintText: 'Pulse',
+                  hintStyle: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6)),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            const SizedBox(width: 6),
+            // Fark
+            SizedBox(
+              width: 60,
+              child: Text(
+                ctrl.text.isEmpty
+                    ? '—'
+                    : eslesme
+                        ? '✓'
+                        : '${fark >= 0 ? '+' : ''}${_formatTL(fark)}',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: ctrl.text.isEmpty
+                      ? Colors.grey[400]
+                      : eslesme
+                          ? Colors.green[700]
+                          : Colors.red[700],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final farkliSayisi = _pulseKiyasCtrl.entries.where((e) {
+      final ctrl = e.value;
+      if (ctrl.text.isEmpty) return false;
+      double programVal = 0;
+      if (e.key == '__pos__') {
+        programVal = posToplamiVal;
+      } else {
+        final o = _onlineOdemeler.firstWhere(
+          (o) => o['ad'] == e.key,
+          orElse: () => {},
+        );
+        if (o.isNotEmpty) {
+          programVal = _myDominosOkunan[e.key] ??
+              _parseDouble((o['ctrl'] as TextEditingController).text);
+        }
+      }
+      return (programVal - _parseDouble(ctrl.text)).abs() >= 0.01;
+    }).length;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Resim okuma butonları
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _readOnly || _myDominosOkunuyor
+                          ? null
+                          : _myDominosResmiOku,
+                      icon: _myDominosOkunuyor
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : Icon(
+                              _myDominosYuklendi
+                                  ? Icons.check_circle
+                                  : Icons.camera_alt,
+                              size: 15),
+                      label: Text(
+                        _myDominosYuklendi ? 'My Dom. ✓' : 'My Dominos',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _myDominosYuklendi
+                            ? Colors.green[700]
+                            : const Color(0xFF0288D1),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _readOnly ? null : _pulseResmiOku,
+                      icon: const Icon(Icons.camera_alt, size: 15),
+                      label: const Text('Pulse Resmi',
+                          style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0288D1),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Pulse kıyas tablosu
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Başlık satırı
+                  Row(
+                    children: [
+                      const Expanded(
+                          flex: 3,
+                          child: Text('Kalem',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.bold))),
+                      const Expanded(
+                          flex: 3,
+                          child: Text('Program',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.bold))),
+                      const SizedBox(width: 6),
+                      SizedBox(
+                          width: 80,
+                          child: Text('Pulse',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[600],
+                                  fontWeight: FontWeight.bold))),
+                      const SizedBox(width: 6),
+                      const SizedBox(
+                          width: 60,
+                          child: Text('Fark',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.bold))),
+                    ],
+                  ),
+                  const Divider(height: 16),
+
+                  // Brüt Satış (sadece gösterim)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                            flex: 3,
+                            child: Text('Brüt Satış',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold))),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            brutSatis > 0 ? _formatTL(brutSatis) : '—',
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const SizedBox(width: 80),
+                        const SizedBox(width: 6),
+                        const SizedBox(width: 60),
+                      ],
+                    ),
+                  ),
+
+                  // Banka Parası (otomatik hesap)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.teal[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.teal[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                            flex: 3,
+                            child: Text('Banka Parası',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold))),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            _formatTL(bankaParasi),
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: bankaParasi >= 0
+                                  ? Colors.teal[700]
+                                  : Colors.red[700],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const SizedBox(
+                            width: 80,
+                            child: Text('otomatik',
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.grey))),
+                        const SizedBox(width: 6),
+                        const SizedBox(width: 60),
+                      ],
+                    ),
+                  ),
+
+                  // Kredi Kartı / POS
+                  _kiyasSatiri(
+                    etiket: '01. Kredi Kartı',
+                    programVal: posToplamiVal,
+                    kiyasKey: '__pos__',
+                  ),
+
+                  // Online ödemeler — Pulse sırasına göre
+                  ...siraliOnline.map((o) {
+                    final ad = o['ad'] as String;
+                    final pulseSira = o['pulseSira'] as int? ?? 99;
+                    final myDomVal = _myDominosOkunan[ad];
+                    final programVal = myDomVal ??
+                        _parseDouble((o['ctrl'] as TextEditingController).text);
+                    return _kiyasSatiri(
+                      etiket: '$pulseSira. $ad',
+                      programVal: programVal,
+                      kiyasKey: ad,
+                    );
+                  }),
+
+                  // Pulse kalemleri — sadece kıyas tablosunda görünür
+                  ..._pulseKalemleri.map((k) {
+                    final ad = k['ad'] as String;
+                    final pulseSira = k['pulseSira'] as int? ?? 99;
+                    _pulseKiyasCtrl.putIfAbsent(
+                        ad, () => TextEditingController());
+                    return _kiyasSatiri(
+                      etiket: '$pulseSira. $ad',
+                      programVal: 0,
+                      kiyasKey: ad,
+                    );
+                  }),
+
+                  const Divider(height: 16),
+
+                  // Özet
+                  if (farkliSayisi > 0)
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.orange[300]!),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.warning_amber,
+                              color: Colors.orange[700], size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            '$farkliSayisi kalemde fark var — Pulse\'u düzeltin',
+                            style: TextStyle(
+                                color: Colors.orange[800],
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_pulseKiyasCtrl.values.any((c) => c.text.isNotEmpty))
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.check_circle,
+                              color: Colors.green[700], size: 16),
+                          const SizedBox(width: 6),
+                          Text('Tüm kalemler eşleşiyor ✓',
+                              style: TextStyle(
+                                  color: Colors.green[700],
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _onlineOdemeSection(),
+          const SizedBox(height: 12),
+          _ekrandaGorunenNakitSection(),
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
   // ── Pulse Resmi Okuma ────────────────────────────────────────────────────────
 
   Future<void> _pulseResmiOku() async {
@@ -4282,48 +4730,246 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
     }
   }
 
-  Future<void> _onlineOdemeleriYukle() async {
+  // ── My Dominos Resmi Okuma ───────────────────────────────────────────────────
+
+  Future<void> _myDominosResmiOku() async {
     try {
-      final snap = await FirebaseFirestore.instance
+      // Gemini API key Firestore'dan al
+      final ayarDoc = await FirebaseFirestore.instance
+          .collection('ayarlar')
+          .doc('gemini')
+          .get();
+      final apiKey = ayarDoc.data()?['apiKey'] as String? ?? '';
+      if (apiKey.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Gemini API key girilmemiş. Ayarlar ekranından ekleyin.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Resim seç
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+      );
+      if (picked == null) return;
+
+      setState(() => _myDominosOkunuyor = true);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('My Dominos resmi okunuyor...'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      // Resmi base64'e çevir
+      final bytes = await picked.readAsBytes();
+      final base64Image = base64Encode(bytes);
+      final mimeType = picked.mimeType ?? 'image/jpeg';
+
+      // Online ödeme listesini Firestore'dan al — digerEkranAdi ile eşleştirme
+      final onlineSnap = await FirebaseFirestore.instance
           .collection('odemeyontemleri')
           .where('tip', isEqualTo: 'online')
           .where('aktif', isEqualTo: true)
           .get();
+
+      final kanallar = onlineSnap.docs
+          .map((d) {
+            final ad = d.data()['ad'] as String? ?? '';
+            final digerAd = d.data()['digerEkranAdi'] as String? ?? '';
+            return digerAd.isNotEmpty
+                ? '$ad (My Dominos\'taki adı: $digerAd)'
+                : ad;
+          })
+          .where((s) => s.isNotEmpty)
+          .join(', ');
+
+      final prompt = """Bu bir My Dominos sipariş dökümü ekran görüntüsü.
+Sadece "Online Kredi" veya "Banka Kartı" içeren satırların Ciro değerlerini al.
+Nakit, Metropol Kart, Pluxee gibi yemek kartı satırlarını alma.
+
+Kanallar ve My Dominos'taki adları: $kanallar
+
+Aşağıdaki JSON formatında döndür:
+{"online": [{"ad": "sistem_adi", "tutar": 1234.56}]}
+
+Sadece JSON döndür, başka açıklama yazma.
+Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
+
+      final response = await http.post(
+        Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=$apiKey',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {
+                  'inline_data': {
+                    'mime_type': mimeType,
+                    'data': base64Image,
+                  }
+                },
+                {'text': prompt}
+              ]
+            }
+          ],
+          'generationConfig': {'temperature': 0},
+        }),
+      );
+
+      setState(() => _myDominosOkunuyor = false);
+
+      if (response.statusCode != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('API hatası: ${response.statusCode}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final responseJson = jsonDecode(response.body);
+      final text = responseJson['candidates']?[0]?['content']?['parts']?[0]
+              ?['text'] as String? ??
+          '';
+      if (text.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Resimden veri alınamadı.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      final cleanText = text.replaceAll(RegExp(r'```json|```'), '').trim();
+      final Map<String, dynamic> okunan = jsonDecode(cleanText);
+
+      final Map<String, double> yeniOkunan = {};
+      if (okunan['online'] != null) {
+        for (final o in (okunan['online'] as List)) {
+          final ad = o['ad'] as String? ?? '';
+          final tutar = (o['tutar'] as num? ?? 0).toDouble();
+          if (ad.isNotEmpty && tutar > 0) yeniOkunan[ad] = tutar;
+        }
+      }
+
+      if (yeniOkunan.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Eşleşen online ödeme bulunamadı.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      setState(() {
+        _myDominosOkunan = yeniOkunan;
+        _myDominosYuklendi = true;
+      });
+
       if (mounted) {
-        final adlar = snap.docs
-            .map((d) => d.data()['ad'] as String? ?? '')
-            .where((ad) => ad.isNotEmpty)
-            .toList();
-        // sira alanına göre sırala
-        final docsWithSira = snap.docs.toList();
-        docsWithSira.sort((a, b) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('My Dominos: ${yeniOkunan.length} kanal okundu ✓'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _myDominosOkunuyor = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Hata: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _onlineOdemeleriYukle() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('odemeyontemleri')
+          .where('aktif', isEqualTo: true)
+          .get();
+      if (mounted) {
+        final onlineDocs =
+            snap.docs.where((d) => d.data()['tip'] == 'online').toList();
+        final pulseDocs =
+            snap.docs.where((d) => d.data()['tip'] == 'pulseKalemi').toList();
+
+        // Sırala
+        onlineDocs.sort((a, b) {
           final sa = (a.data()['sira'] as num?)?.toInt() ?? 999;
           final sb = (b.data()['sira'] as num?)?.toInt() ?? 999;
           return sa.compareTo(sb);
         });
-        final siraliAdlar = docsWithSira
+        pulseDocs.sort((a, b) {
+          final sa = (a.data()['pulseSira'] as num?)?.toInt() ?? 999;
+          final sb = (b.data()['pulseSira'] as num?)?.toInt() ?? 999;
+          return sa.compareTo(sb);
+        });
+
+        final siraliAdlar = onlineDocs
             .map((d) => d.data()['ad'] as String? ?? '')
             .where((ad) => ad.isNotEmpty)
             .toList();
+
         setState(() {
           _onlineOdemeAdlari = siraliAdlar;
-          // Mevcut ctrl'leri koru, yenilerini ekle
           final mevcutAdlar =
               _onlineOdemeler.map((o) => o['ad'] as String).toSet();
-          for (var ad in siraliAdlar) {
+          for (var doc in onlineDocs) {
+            final ad = doc.data()['ad'] as String? ?? '';
+            if (ad.isEmpty) continue;
             if (!mevcutAdlar.contains(ad)) {
               _onlineOdemeler.add({
                 'ad': ad,
                 'ctrl': TextEditingController(),
+                'pulseSira': doc.data()['pulseSira'] ?? 99,
+                'digerEkranAdi': doc.data()['digerEkranAdi'] ?? '',
               });
             }
           }
-          // Sırayı düzelt
           _onlineOdemeler.sort((a, b) {
             final ia = siraliAdlar.indexOf(a['ad'] as String);
             final ib = siraliAdlar.indexOf(b['ad'] as String);
             return ia.compareTo(ib);
           });
+
+          // Pulse kalemleri
+          _pulseKalemleri = pulseDocs
+              .map((d) => {
+                    'ad': d.data()['ad'] as String? ?? '',
+                    'pulseAdi': d.data()['pulseAdi'] as String? ?? '',
+                    'pulseSira': d.data()['pulseSira'] ?? 99,
+                  })
+              .where((m) => (m['ad'] as String).isNotEmpty)
+              .toList();
         });
       }
     } catch (_) {}
@@ -4340,6 +4986,8 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
   @override
   void dispose() {
+    _tabController.dispose();
+    for (var c in _pulseKiyasCtrl.values) c.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _kilitBirak();
     _kilitTimer?.cancel();
@@ -12443,259 +13091,175 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
                           );
                         },
                       ),
+                      // Tarih seçici — her zaman görünür
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        child: _tarihSeciciSection(),
+                      ),
+                      // Sekme başlıkları
+                      TabBar(
+                        controller: _tabController,
+                        isScrollable: true,
+                        tabAlignment: TabAlignment.start,
+                        labelColor: const Color(0xFF0288D1),
+                        unselectedLabelColor: Colors.grey,
+                        indicatorColor: const Color(0xFF0288D1),
+                        labelStyle: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold),
+                        tabs: const [
+                          Tab(text: 'POS & Kart'),
+                          Tab(text: 'Pulse / My Dominos'),
+                          Tab(text: 'Şube Kasa'),
+                          Tab(text: 'Ana Kasa'),
+                          Tab(text: 'Transfer / Diğer Alım'),
+                          Tab(text: 'Özet & Kapat'),
+                        ],
+                      ),
                       Expanded(
-                        child: SingleChildScrollView(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            children: [
-                              _tarihSeciciSection(),
-                              const SizedBox(height: 12),
-                              _posSection(),
-                              const SizedBox(height: 12),
-                              _yemekKartiSection(),
-                              const SizedBox(height: 12),
-                              _gunlukSatisSection(),
-                              const SizedBox(height: 12),
-                              _onlineOdemeSection(),
-                              const SizedBox(height: 12),
-                              _ekrandaGorunenNakitSection(),
-                              const SizedBox(height: 12),
-                              _harcamalarSection(),
-                              const SizedBox(height: 12),
-                              _nakitSayimSection(),
-                              const SizedBox(height: 12),
-                              _ekBilgilerSection(),
-                              const SizedBox(height: 12),
-                              _anaKasaHarcamalarSection(),
-                              const SizedBox(height: 12),
-                              _bankayaYatanSection(),
-                              const SizedBox(height: 12),
-                              _nakitCikisSection(),
-                              const SizedBox(height: 12),
-                              _transferlerSection(),
-                              const SizedBox(height: 12),
-                              _digerAlimlarSection(),
-                              const SizedBox(height: 12),
-                              _kasaOzetiSection(),
-                              const SizedBox(height: 12),
-                              _anaKasaSection(),
-                              const SizedBox(height: 24),
-                              if (_dovizLimitiAsildi)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.red[300]!),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.error_outline,
-                                        color: Colors.red[700],
-                                        size: 20,
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [
+                            // ── Sekme 1: POS & Yemek Kartı ──
+                            SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                children: [
+                                  _posSection(),
+                                  const SizedBox(height: 12),
+                                  _yemekKartiSection(),
+                                  const SizedBox(height: 32),
+                                ],
+                              ),
+                            ),
+                            // ── Sekme 2: Pulse / My Dominos ──
+                            _pulseKiyasSekmesi(),
+                            // ── Sekme 3: Şube Kasa ──
+                            SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                children: [
+                                  _harcamalarSection(),
+                                  const SizedBox(height: 12),
+                                  _nakitSayimSection(),
+                                  const SizedBox(height: 12),
+                                  _ekBilgilerSection(),
+                                  const SizedBox(height: 12),
+                                  _kasaOzetiSection(),
+                                  const SizedBox(height: 32),
+                                ],
+                              ),
+                            ),
+                            // ── Sekme 4: Ana Kasa ──
+                            SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                children: [
+                                  _anaKasaHarcamalarSection(),
+                                  const SizedBox(height: 12),
+                                  _bankayaYatanSection(),
+                                  const SizedBox(height: 12),
+                                  _nakitCikisSection(),
+                                  const SizedBox(height: 12),
+                                  _anaKasaSection(),
+                                  const SizedBox(height: 32),
+                                ],
+                              ),
+                            ),
+                            // ── Sekme 5: Transfer / Diğer Alım ──
+                            SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                children: [
+                                  _transferlerSection(),
+                                  const SizedBox(height: 12),
+                                  _digerAlimlarSection(),
+                                  const SizedBox(height: 32),
+                                ],
+                              ),
+                            ),
+                            // ── Sekme 6: Özet & Kapat ──
+                            SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                children: [
+                                  _kasaOzetiSection(),
+                                  const SizedBox(height: 12),
+                                  _anaKasaSection(),
+                                  const SizedBox(height: 24),
+                                  if (_dovizLimitiAsildi)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 12),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
                                       ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'Bankaya yatırılan döviz miktarı kasadakinden fazla! Lütfen düzeltin.',
-                                          style: TextStyle(
+                                      decoration: BoxDecoration(
+                                        color: Colors.red[50],
+                                        borderRadius: BorderRadius.circular(8),
+                                        border:
+                                            Border.all(color: Colors.red[300]!),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.error_outline,
                                             color: Colors.red[700],
-                                            fontWeight: FontWeight.w600,
+                                            size: 20,
                                           ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              // İnternet yok uyarısı
-                              // Ana Kasa limit uyarısı
-                              if (_anaKasaLimitiAsildi)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.deepOrange[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: Colors.deepOrange[300]!,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.account_balance_wallet,
-                                        color: Colors.deepOrange[700],
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'Ana Kasa eksi kalıyor (${_formatTL(_anaKasaKalani)})! Yapılan işlemler Ana Kasayı aşıyor.',
-                                          style: TextStyle(
-                                            color: Colors.deepOrange[800],
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              if (!_internetVar)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: Colors.orange[400]!,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.wifi_off,
-                                        color: Colors.orange[800],
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'İnternet bağlantısı yok. Kayıt yapılamaz.',
-                                          style: TextStyle(
-                                            color: Colors.orange[900],
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              // Günü Kapat / Düzenlemeyi Aç — dönüşümlü
-                              if (_gunuKapatildi && !_duzenlemeAcik)
-                                // Gün kapatılmış — Düzenlemeyi Aç
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: 52,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () async {
-                                      final hakki = widget.gecmisGunHakki;
-                                      // Yönetici (hakki == -1) sınırsız
-                                      if (hakki >= 0) {
-                                        // Referans: en son kapatılan gün
-                                        // (navigasyon limiti ile aynı mantık)
-                                        final referans =
-                                            _sonKapaliTarih ?? _bugunuHesapla();
-                                        final fark = referans
-                                            .difference(
-                                              DateTime(
-                                                _secilenTarih.year,
-                                                _secilenTarih.month,
-                                                _secilenTarih.day,
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              'Bankaya yatırılan döviz miktarı kasadakinden fazla! Lütfen düzeltin.',
+                                              style: TextStyle(
+                                                color: Colors.red[700],
+                                                fontWeight: FontWeight.w600,
                                               ),
-                                            )
-                                            .inDays;
-                                        if (fark > hakki) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                hakki == 0
-                                                    ? 'Geçmiş kayıtları düzenleme yetkiniz yok.'
-                                                    : '$hakki günden eski kayıtları düzenleyemezsiniz.',
-                                              ),
-                                              backgroundColor: Colors.red,
                                             ),
-                                          );
-                                          return;
-                                        }
-                                      }
-                                      await FirebaseFirestore.instance
-                                          .collection('subeler')
-                                          .doc(widget.subeKodu)
-                                          .collection('gunluk')
-                                          .doc(_tarihKey(_secilenTarih))
-                                          .update({
-                                        'tamamlandi': false,
-                                        'aktiviteLog': FieldValue.arrayUnion([
-                                          {
-                                            'islem': 'Düzenlemeyi Aç',
-                                            'kullanici': _mevcutKullanici,
-                                            'zaman': Timestamp.now(),
-                                          }
-                                        ]),
-                                      });
-                                      if (mounted) {
-                                        setState(() {
-                                          _gunuKapatildi = false;
-                                          _duzenlemeAcik = true;
-                                          _degisiklikVar = true;
-                                          _gercekDegisiklikVar = false;
-                                        });
-                                      }
-                                    },
-                                    icon: const Icon(Icons.lock_open),
-                                    label: const Text(
-                                      'Düzenlemeyi Aç',
-                                      style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.bold,
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Colors.orange[700],
-                                      side: BorderSide(
-                                        color: Colors.orange[700]!,
+                                  // İnternet yok uyarısı
+                                  // Ana Kasa limit uyarısı
+                                  if (_anaKasaLimitiAsildi)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 12),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
                                       ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
+                                      decoration: BoxDecoration(
+                                        color: Colors.deepOrange[50],
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: Colors.deepOrange[300]!,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.account_balance_wallet,
+                                            color: Colors.deepOrange[700],
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              'Ana Kasa eksi kalıyor (${_formatTL(_anaKasaKalani)})! Yapılan işlemler Ana Kasayı aşıyor.',
+                                              style: TextStyle(
+                                                color: Colors.deepOrange[800],
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                  ),
-                                )
-                              else ...[
-                                // Düzenleme modu — uyarı + Günü Kapat
-                                Builder(
-                                  builder: (ctx) {
-                                    final islemsiz = _transferler.where((t) {
-                                      final kategori = t['kategori'] as String;
-                                      final tutar = _parseDouble(
-                                        (t['tutarCtrl']
-                                                as TextEditingController)
-                                            .text,
-                                      );
-                                      if (tutar <= 0) return false;
-                                      if (t['gonderildi'] == true) return false;
-                                      if (kategori == 'GİDEN') {
-                                        final hedef =
-                                            t['hedefSube'] as String? ?? '';
-                                        return hedef.isNotEmpty &&
-                                            hedef != 'diger';
-                                      } else if (kategori == 'GELEN') {
-                                        final kaynak =
-                                            t['kaynakSube'] as String? ?? '';
-                                        return kaynak.isNotEmpty;
-                                      }
-                                      return false;
-                                    }).length;
-                                    if (islemsiz == 0)
-                                      return const SizedBox.shrink();
-                                    return Container(
-                                      margin: const EdgeInsets.only(bottom: 10),
+                                  if (!_internetVar)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 12),
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 14,
                                         vertical: 10,
@@ -12710,100 +13274,255 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
                                       child: Row(
                                         children: [
                                           Icon(
-                                            Icons.send_outlined,
+                                            Icons.wifi_off,
                                             color: Colors.orange[800],
-                                            size: 18,
+                                            size: 20,
                                           ),
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
-                                              '$islemsiz adet transfer gönderilmedi/bildirilmedi — '
-                                              'işleyin veya silin',
+                                              'İnternet bağlantısı yok. Kayıt yapılamaz.',
                                               style: TextStyle(
                                                 color: Colors.orange[900],
                                                 fontWeight: FontWeight.w600,
-                                                fontSize: 13,
                                               ),
                                             ),
                                           ),
                                         ],
                                       ),
-                                    );
-                                  },
-                                ),
-                                // Günü Kapat butonu
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: 52,
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      gradient: (_kaydetButonuAktif &&
-                                              _kilitTutanKullanici == null)
-                                          ? const LinearGradient(
-                                              colors: [
-                                                Color(0xFF01579B),
-                                                Color(0xFF0288D1),
-                                                Color(0xFF29B6F6)
-                                              ],
-                                              begin: Alignment.centerLeft,
-                                              end: Alignment.centerRight,
-                                            )
-                                          : const LinearGradient(
-                                              colors: [
-                                                Colors.grey,
-                                                Colors.grey
-                                              ],
-                                            ),
-                                      borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: ElevatedButton.icon(
-                                      onPressed: (_kaydetButonuAktif &&
-                                              _kilitTutanKullanici == null)
-                                          ? _kaydet
-                                          : null,
-                                      icon: _kaydediliyor
-                                          ? const SizedBox(
-                                              width: 20,
-                                              height: 20,
-                                              child: CircularProgressIndicator(
-                                                color: Colors.white,
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : Icon(
-                                              !_internetVar
-                                                  ? Icons.wifi_off
-                                                  : Icons.lock_clock,
-                                            ),
-                                      label: Text(
-                                        _kaydediliyor
-                                            ? 'Kaydediliyor...'
-                                            : !_internetVar
-                                                ? 'Bağlantı Yok'
-                                                : 'Günü Kapat',
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
+                                  // Günü Kapat / Düzenlemeyi Aç — dönüşümlü
+                                  if (_gunuKapatildi && !_duzenlemeAcik)
+                                    // Gün kapatılmış — Düzenlemeyi Aç
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 52,
+                                      child: OutlinedButton.icon(
+                                        onPressed: () async {
+                                          final hakki = widget.gecmisGunHakki;
+                                          // Yönetici (hakki == -1) sınırsız
+                                          if (hakki >= 0) {
+                                            // Referans: en son kapatılan gün
+                                            // (navigasyon limiti ile aynı mantık)
+                                            final referans = _sonKapaliTarih ??
+                                                _bugunuHesapla();
+                                            final fark = referans
+                                                .difference(
+                                                  DateTime(
+                                                    _secilenTarih.year,
+                                                    _secilenTarih.month,
+                                                    _secilenTarih.day,
+                                                  ),
+                                                )
+                                                .inDays;
+                                            if (fark > hakki) {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    hakki == 0
+                                                        ? 'Geçmiş kayıtları düzenleme yetkiniz yok.'
+                                                        : '$hakki günden eski kayıtları düzenleyemezsiniz.',
+                                                  ),
+                                                  backgroundColor: Colors.red,
+                                                ),
+                                              );
+                                              return;
+                                            }
+                                          }
+                                          await FirebaseFirestore.instance
+                                              .collection('subeler')
+                                              .doc(widget.subeKodu)
+                                              .collection('gunluk')
+                                              .doc(_tarihKey(_secilenTarih))
+                                              .update({
+                                            'tamamlandi': false,
+                                            'aktiviteLog':
+                                                FieldValue.arrayUnion([
+                                              {
+                                                'islem': 'Düzenlemeyi Aç',
+                                                'kullanici': _mevcutKullanici,
+                                                'zaman': Timestamp.now(),
+                                              }
+                                            ]),
+                                          });
+                                          if (mounted) {
+                                            setState(() {
+                                              _gunuKapatildi = false;
+                                              _duzenlemeAcik = true;
+                                              _degisiklikVar = true;
+                                              _gercekDegisiklikVar = false;
+                                            });
+                                          }
+                                        },
+                                        icon: const Icon(Icons.lock_open),
+                                        label: const Text(
+                                          'Düzenlemeyi Aç',
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.orange[700],
+                                          side: BorderSide(
+                                            color: Colors.orange[700]!,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
                                         ),
                                       ),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.transparent,
-                                        shadowColor: Colors.transparent,
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(
+                                    )
+                                  else ...[
+                                    // Düzenleme modu — uyarı + Günü Kapat
+                                    Builder(
+                                      builder: (ctx) {
+                                        final islemsiz =
+                                            _transferler.where((t) {
+                                          final kategori =
+                                              t['kategori'] as String;
+                                          final tutar = _parseDouble(
+                                            (t['tutarCtrl']
+                                                    as TextEditingController)
+                                                .text,
+                                          );
+                                          if (tutar <= 0) return false;
+                                          if (t['gonderildi'] == true)
+                                            return false;
+                                          if (kategori == 'GİDEN') {
+                                            final hedef =
+                                                t['hedefSube'] as String? ?? '';
+                                            return hedef.isNotEmpty &&
+                                                hedef != 'diger';
+                                          } else if (kategori == 'GELEN') {
+                                            final kaynak =
+                                                t['kaynakSube'] as String? ??
+                                                    '';
+                                            return kaynak.isNotEmpty;
+                                          }
+                                          return false;
+                                        }).length;
+                                        if (islemsiz == 0)
+                                          return const SizedBox.shrink();
+                                        return Container(
+                                          margin:
+                                              const EdgeInsets.only(bottom: 10),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 10,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange[50],
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            border: Border.all(
+                                              color: Colors.orange[400]!,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.send_outlined,
+                                                color: Colors.orange[800],
+                                                size: 18,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  '$islemsiz adet transfer gönderilmedi/bildirilmedi — '
+                                                  'işleyin veya silin',
+                                                  style: TextStyle(
+                                                    color: Colors.orange[900],
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    // Günü Kapat butonu
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 52,
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          gradient: (_kaydetButonuAktif &&
+                                                  _kilitTutanKullanici == null)
+                                              ? const LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF01579B),
+                                                    Color(0xFF0288D1),
+                                                    Color(0xFF29B6F6)
+                                                  ],
+                                                  begin: Alignment.centerLeft,
+                                                  end: Alignment.centerRight,
+                                                )
+                                              : const LinearGradient(
+                                                  colors: [
+                                                    Colors.grey,
+                                                    Colors.grey
+                                                  ],
+                                                ),
                                           borderRadius:
                                               BorderRadius.circular(12),
                                         ),
+                                        child: ElevatedButton.icon(
+                                          onPressed: (_kaydetButonuAktif &&
+                                                  _kilitTutanKullanici == null)
+                                              ? _kaydet
+                                              : null,
+                                          icon: _kaydediliyor
+                                              ? const SizedBox(
+                                                  width: 20,
+                                                  height: 20,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                    color: Colors.white,
+                                                    strokeWidth: 2,
+                                                  ),
+                                                )
+                                              : Icon(
+                                                  !_internetVar
+                                                      ? Icons.wifi_off
+                                                      : Icons.lock_clock,
+                                                ),
+                                          label: Text(
+                                            _kaydediliyor
+                                                ? 'Kaydediliyor...'
+                                                : !_internetVar
+                                                    ? 'Bağlantı Yok'
+                                                    : 'Günü Kapat',
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.transparent,
+                                            shadowColor: Colors.transparent,
+                                            foregroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 32),
-                            ],
-                          ),
-                        ),
-                      ),
+                                  ],
+                                  const SizedBox(height: 32),
+                                ],
+                              ),
+                            ),
+                          ], // TabBarView children kapanış
+                        ), // TabBarView kapanış
+                      ), // Expanded kapanış
                     ],
                   );
                 },
@@ -14952,6 +15671,10 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
     final pulseCtrl = TextEditingController(text: mevcut?['pulseAdi'] ?? '');
     final digerCtrl =
         TextEditingController(text: mevcut?['digerEkranAdi'] ?? '');
+    final pulseSiraCtrl = TextEditingController(
+        text: mevcut?['pulseSira'] != null
+            ? mevcut!['pulseSira'].toString()
+            : '');
     String tip = mevcut?['tip'] ?? 'yemekKarti';
     bool aktif = mevcut?['aktif'] ?? true;
 
@@ -14983,6 +15706,14 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                   decoration: const InputDecoration(
                       labelText: 'Diğer ekrandaki adı', isDense: true),
                 ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: pulseSiraCtrl,
+                  decoration: const InputDecoration(
+                      labelText: 'Pulse sıra no (örn: 1, 2, 8...)',
+                      isDense: true),
+                  keyboardType: TextInputType.number,
+                ),
                 const SizedBox(height: 12),
                 const Text('Tip',
                     style: TextStyle(fontSize: 12, color: Colors.grey)),
@@ -15011,6 +15742,16 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                     ),
                   ],
                 ),
+                RadioListTile<String>(
+                  title: const Text('Pulse Kalemi',
+                      style: TextStyle(fontSize: 13)),
+                  subtitle: const Text('Sadece Pulse özet tablosunda görünür',
+                      style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  value: 'pulseKalemi',
+                  groupValue: tip,
+                  dense: true,
+                  onChanged: (v) => setDlg(() => tip = v!),
+                ),
                 SwitchListTile(
                   title: const Text('Aktif', style: TextStyle(fontSize: 13)),
                   value: aktif,
@@ -15033,6 +15774,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                   'ad': ad,
                   'pulseAdi': pulseCtrl.text.trim(),
                   'digerEkranAdi': digerCtrl.text.trim(),
+                  'pulseSira': int.tryParse(pulseSiraCtrl.text.trim()) ?? 99,
                   'tip': tip,
                   'aktif': aktif,
                   'sira': mevcut?['sira'] ?? _liste.length,
@@ -15059,6 +15801,7 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
     adCtrl.dispose();
     pulseCtrl.dispose();
     digerCtrl.dispose();
+    pulseSiraCtrl.dispose();
   }
 
   Future<void> _sil(String id) async {
