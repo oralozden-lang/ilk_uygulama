@@ -3098,12 +3098,19 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   final List<YemekKartiGirisi> _yemekKartlari = [];
   final Map<String, TextEditingController> _sistemYemekKartiCtrl = {};
   List<String> _yemekKartiCinsleri = []; // Firestore'dan yüklenir
+  List<Map<String, dynamic>> _yemekKartiTanimlari =
+      []; // {ad, pulseSira, pulseAdi}
   List<Map<String, dynamic>> _onlineOdemeler = []; // {ad, ctrl}
   Map<String, double> _myDominosOkunan = {}; // My Dominos okunan veriler
   bool _myDominosYuklendi = false;
   bool _myDominosOkunuyor = false;
+  bool _pulseOkunuyor = false;
+  bool _pulseIptalEdildi = false;
+  bool _myDomIptalEdildi = false;
   final Map<String, TextEditingController> _pulseKiyasCtrl =
       {}; // Pulse manuel giriş
+  final Map<String, TextEditingController> _myDomKiyasCtrl =
+      {}; // MyDom manuel giriş
   List<Map<String, dynamic>> _pulseKalemleri = []; // tip: pulseKalemi
   List<String> _onlineOdemeAdlari = []; // Firestore'dan yüklenir
   final TextEditingController _sistemPosCtrl = TextEditingController();
@@ -3179,6 +3186,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   void initState() {
     super.initState();
     _tabController = TabController(length: 6, vsync: this);
+    // Pulse/MyDom sekmesine geçince rebuild et — POS değerleri güncellensin
+    _tabController.addListener(() {
+      if (_tabController.index == 1 && mounted) setState(() {});
+    });
     _banknotlariYukle();
     _giderTurleriYukle();
     _yemekKartiCinsleriniYukle();
@@ -3630,8 +3641,13 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           _appBarMesajGoster('✓ Otomatik Kaydedildi');
           await _kilitBirak();
         }
-      } catch (_) {
-        if (mounted) _appBarMesajGoster('✗ Kayıt Hatası');
+      } catch (e) {
+        if (mounted) {
+          _appBarMesajGoster('✗ Kayıt Hatası: $e');
+          // Hata detayını konsola da yaz
+          // ignore: avoid_print
+          print('OTOMATIK KAYIT HATASI: $e');
+        }
       } finally {
         if (mounted) setState(() => _otomatikKaydediliyor = false);
       }
@@ -3676,6 +3692,16 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               })
           .toList(),
       'gunlukSatisToplami': _parseDouble(_gunlukSatisCtrl.text),
+      'pulseKiyasVerileri': Map.fromEntries(
+        _pulseKiyasCtrl.entries
+            .where((e) => e.value.text.isNotEmpty)
+            .map((e) => MapEntry(e.key, e.value.text)),
+      ),
+      'myDomKiyasVerileri': Map.fromEntries(
+        _myDomKiyasCtrl.entries
+            .where((e) => e.value.text.isNotEmpty)
+            .map((e) => MapEntry(e.key, e.value.text)),
+      ),
       'harcamalar': _harcamalar
           .map(
             (h) => {
@@ -4000,12 +4026,38 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           .where('aktif', isEqualTo: true)
           .get();
       if (mounted) {
-        final cinsList = snap.docs
+        final docs = snap.docs.toList();
+        // pulseSira'ya göre sırala
+        docs.sort((a, b) {
+          final sa = (a.data()['pulseSira'] as num?)?.toInt() ?? 99;
+          final sb = (b.data()['pulseSira'] as num?)?.toInt() ?? 99;
+          return sa.compareTo(sb);
+        });
+        final cinsList = docs
             .map((d) => d.data()['ad'] as String? ?? '')
             .where((ad) => ad.isNotEmpty)
             .toList();
         setState(() {
           _yemekKartiCinsleri = cinsList;
+          _yemekKartiTanimlari = docs
+              .map((d) => {
+                    'ad': d.data()['ad'] as String? ?? '',
+                    'pulseSira': (d.data()['pulseSira'] as num?)?.toInt() ?? 99,
+                    'pulseAdi': d.data()['pulseAdi'] as String? ?? '',
+                  })
+              .where((m) => (m['ad'] as String).isNotEmpty)
+              .toList();
+          // Pulse ctrl'lerini hazırla
+          _pulseKiyasCtrl.putIfAbsent(
+              'pulseBrut', () => TextEditingController());
+          _pulseKiyasCtrl.putIfAbsent(
+              'pulseBanka', () => TextEditingController());
+          _pulseKiyasCtrl.putIfAbsent(
+              'pulsePos', () => TextEditingController());
+          for (final t in _yemekKartiTanimlari) {
+            final key = 'yemek_${t['ad']}';
+            _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
+          }
           // Sistem Pulse ctrl'lerini hazırla
           for (var c in cinsList) {
             _sistemYemekKartiCtrl[c] ??= TextEditingController();
@@ -4022,111 +4074,213 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   // ── Pulse / My Dominos Kıyas Sekmesi ─────────────────────────────────────────
 
   Widget _pulseKiyasSekmesi() {
-    // Tüm kalemleri Pulse sırasına göre hazırla
-    // POS kalemi — sıra 1 (sabit)
     final posToplamiVal = _posListesi.fold<double>(
       0,
       (sum, p) => sum + _parseDouble(p.tutarCtrl.text),
     );
-    final brutSatis = _parseDouble(_gunlukSatisCtrl.text);
 
-    // Online ödemeleri pulseSira'ya göre sırala
-    final siraliOnline = List<Map<String, dynamic>>.from(_onlineOdemeler)
-      ..sort((a, b) {
-        final sa = (a['pulseSira'] as int? ?? 99);
-        final sb = (b['pulseSira'] as int? ?? 99);
-        return sa.compareTo(sb);
-      });
+    // Yemek kartı toplamı — tanımlı kartların girilen tutarları
+    Map<String, double> yemekTutarlari = {};
+    for (var c in _yemekKartlari) {
+      final tutar = _parseDouble(c.tutarCtrl.text);
+      yemekTutarlari[c.cins] = (yemekTutarlari[c.cins] ?? 0) + tutar;
+    }
 
-    // Tüm kalemlerin toplamını hesapla (Banka Parası için)
-    double toplamKalemlerVal = posToplamiVal;
+    // Online toplamı
+    double onlineToplamiVal = 0;
     for (final o in _onlineOdemeler) {
-      toplamKalemlerVal +=
+      onlineToplamiVal +=
           _parseDouble((o['ctrl'] as TextEditingController).text);
     }
-    for (var c in _yemekKartlari) {
-      toplamKalemlerVal += _parseDouble(c.tutarCtrl.text);
-    }
-    final bankaParasi = brutSatis - toplamKalemlerVal;
 
-    // Pulse kıyas controller'ı hazırla
-    for (final o in siraliOnline) {
+    // Banka Parası = Brüt Satış - tüm kalemler
+    final brutSatisProgram = _parseDouble(_gunlukSatisCtrl.text);
+    double toplamKalemler = posToplamiVal + onlineToplamiVal;
+    for (var t in yemekTutarlari.values) toplamKalemler += t;
+    final bankaParasi = brutSatisProgram - toplamKalemler;
+
+    // Tüm kalemleri tek listede birleştir — pulseSira'ya göre sırala
+    // Her kalem: {tip, ad, pulseSira, myDomVal, pulseKey}
+    final List<Map<String, dynamic>> tumKalemler = [];
+
+    // Kredi Kartı / POS — pulse kalemleri arasında zaten varsa ekleme
+    final posZatenVar = _pulseKalemleri.any((k) {
+      final ad = (k['ad'] as String).toLowerCase();
+      return ad.contains('kredi') || ad.contains('pos');
+    });
+    if (!posZatenVar) {
+      tumKalemler.add({
+        'tip': 'pos',
+        'ad': 'Kredi Kartı',
+        'pulseSira': 1,
+        'myDomVal': posToplamiVal,
+        'pulseKey': 'pulsePos',
+      });
+    }
+
+    // Yemek kartları — tanımlardan pulseSira alınıyor
+    for (final t in _yemekKartiTanimlari) {
+      final ad = t['ad'] as String;
+      tumKalemler.add({
+        'tip': 'yemek',
+        'ad': ad,
+        'pulseSira': t['pulseSira'] as int? ?? 99,
+        'myDomVal': yemekTutarlari[ad] ?? 0.0,
+        'pulseKey': 'yemek_${ad}',
+      });
+    }
+
+    // Online ödemeler
+    for (final o in _onlineOdemeler) {
       final ad = o['ad'] as String;
-      _pulseKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
+      final myDomVal = _myDominosOkunan.containsKey(ad)
+          ? _myDominosOkunan[ad]!
+          : _parseDouble((o['ctrl'] as TextEditingController).text);
+      tumKalemler.add({
+        'tip': 'online',
+        'ad': ad,
+        'pulseSira': o['pulseSira'] as int? ?? 99,
+        'myDomVal': myDomVal,
+        'pulseKey': ad,
+      });
     }
-    _pulseKiyasCtrl.putIfAbsent('__pos__', () => TextEditingController());
 
-    Widget _kiyasSatiri({
+    // Pulse kalemleri
+    for (final k in _pulseKalemleri) {
+      final ad = k['ad'] as String;
+      final adLower = ad.toLowerCase();
+      // Kredi Kartı ise POS toplamını kullan
+      final myDomVal = (adLower.contains('kredi') || adLower.contains('pos'))
+          ? posToplamiVal
+          : 0.0;
+      tumKalemler.add({
+        'tip': 'pulseKalemi',
+        'ad': ad,
+        'pulseSira': k['pulseSira'] as int? ?? 99,
+        'myDomVal': myDomVal,
+        'pulseKey': ad,
+      });
+    }
+
+    // pulseSira'ya göre sırala
+    tumKalemler.sort((a, b) {
+      final sa = a['pulseSira'] as int;
+      final sb = b['pulseSira'] as int;
+      return sa.compareTo(sb);
+    });
+
+    // Fark sayısı
+    int farkliSayisi = 0;
+
+    // Satır builder — 4 sütun: Kalem | Pulse | My Dominos/Program | Fark
+    Widget satir({
       required String etiket,
-      required double programVal,
-      required String kiyasKey,
-      bool readOnly = false,
+      required String pulseKey,
+      required double myDomVal,
+      bool brutSatirMi = false,
+      bool bankaParasiMi = false,
     }) {
-      final ctrl = _pulseKiyasCtrl[kiyasKey]!;
-      final pulseVal = _parseDouble(ctrl.text);
-      final fark = programVal - pulseVal;
-      final eslesme = ctrl.text.isEmpty ? false : fark.abs() < 0.01;
-      final farkVar = ctrl.text.isNotEmpty && !eslesme;
+      final pulseCtrl = _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
+      final myDomCtrl = _myDomKiyasCtrl[pulseKey];
+      // POS ve yemek için direkt myDomVal, online için ctrl değeri
+      final isPosOrYemek =
+          pulseKey == 'pulsePos' || pulseKey.startsWith('yemek_');
+      final effectiveMyDom = isPosOrYemek
+          ? myDomVal
+          : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
+              ? _parseDouble(myDomCtrl.text)
+              : myDomVal);
+      final pulseVal = _parseDouble(pulseCtrl.text);
+      final fark = effectiveMyDom - pulseVal;
+      final eslesme = pulseCtrl.text.isNotEmpty && fark.abs() < 0.01;
+      final farkVar = pulseCtrl.text.isNotEmpty && !eslesme;
+      if (farkVar) farkliSayisi++;
+
+      if (bankaParasiMi) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.teal[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.teal[200]!),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                  flex: 3,
+                  child: Text(etiket,
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold))),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  _formatTL(myDomVal),
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color:
+                          myDomVal >= 0 ? Colors.teal[700] : Colors.red[700]),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const SizedBox(
+                  width: 80,
+                  child: Text('otomatik',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 10, color: Colors.grey))),
+              const SizedBox(width: 6),
+              const SizedBox(width: 50),
+            ],
+          ),
+        );
+      }
 
       return Container(
         margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: ctrl.text.isEmpty
-              ? Colors.grey[50]
+          color: farkVar
+              ? Colors.red[50]
               : eslesme
                   ? Colors.green[50]
-                  : Colors.red[50],
+                  : Colors.grey[50],
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: ctrl.text.isEmpty
-                ? Colors.grey[200]!
+            color: farkVar
+                ? Colors.red[200]!
                 : eslesme
                     ? Colors.green[200]!
-                    : Colors.red[200]!,
+                    : Colors.grey[200]!,
           ),
         ),
         child: Row(
           children: [
-            // Etiket
+            // Kalem adı
             Expanded(
               flex: 3,
-              child: Text(
-                etiket,
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-              ),
+              child: Text(etiket,
+                  style: const TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w500)),
             ),
-            // Program değeri
-            Expanded(
-              flex: 3,
-              child: Text(
-                programVal > 0 ? _formatTL(programVal) : '0,00 ₺',
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[700],
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            // Pulse değeri (manuel giriş)
+            // Pulse giriş
             SizedBox(
               width: 80,
               child: TextField(
-                controller: ctrl,
+                controller: pulseCtrl,
                 enabled: !_readOnly,
                 textAlign: TextAlign.right,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 inputFormatters: [BinAraciFormatter()],
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: 11),
                 decoration: InputDecoration(
                   isDense: true,
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                  hintText: 'Pulse',
-                  hintStyle: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                  hintText: '0,00',
+                  hintStyle: TextStyle(fontSize: 10, color: Colors.grey[400]),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6)),
                 ),
@@ -4134,20 +4288,78 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               ),
             ),
             const SizedBox(width: 6),
+            // My Dominos / Program değeri — manuel giriş
+            SizedBox(
+              width: 80,
+              child: Builder(builder: (ctx) {
+                // POS ve yemek kartı için ctrl yerine direkt değer göster
+                // Online ve pulse kalemleri için ctrl kullan
+                final isPosOrYemek =
+                    pulseKey == 'pulsePos' || pulseKey.startsWith('yemek_');
+                if (isPosOrYemek) {
+                  // Direkt program değeri — her zaman güncel
+                  return Container(
+                    height: 32,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      border: Border.all(color: Colors.green[200]!),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      myDomVal > 0
+                          ? _formatTL(myDomVal).replaceAll(' ₺', '')
+                          : '0,00',
+                      style: TextStyle(fontSize: 11, color: Colors.green[800]),
+                      textAlign: TextAlign.right,
+                    ),
+                  );
+                }
+                // Online için ctrl — manuel giriş destekli
+                final ctrl =
+                    _myDomKiyasCtrl[pulseKey] ?? TextEditingController();
+                if (ctrl.text.isEmpty && myDomVal > 0) {
+                  ctrl.text = _formatTL(myDomVal).replaceAll(' ₺', '');
+                }
+                return TextField(
+                  controller: ctrl,
+                  enabled: !_readOnly,
+                  textAlign: TextAlign.right,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [BinAraciFormatter()],
+                  style: const TextStyle(fontSize: 11),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    hintText: '0,00',
+                    hintStyle: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6)),
+                    filled: true,
+                    fillColor: Colors.green[50],
+                  ),
+                  onChanged: (_) => setState(() {}),
+                );
+              }),
+            ),
+            const SizedBox(width: 6),
             // Fark
             SizedBox(
-              width: 60,
+              width: 50,
               child: Text(
-                ctrl.text.isEmpty
+                pulseCtrl.text.isEmpty
                     ? '—'
                     : eslesme
                         ? '✓'
                         : '${fark >= 0 ? '+' : ''}${_formatTL(fark)}',
                 textAlign: TextAlign.right,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   fontWeight: FontWeight.bold,
-                  color: ctrl.text.isEmpty
+                  color: pulseCtrl.text.isEmpty
                       ? Colors.grey[400]
                       : eslesme
                           ? Colors.green[700]
@@ -4160,25 +4372,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       );
     }
 
-    final farkliSayisi = _pulseKiyasCtrl.entries.where((e) {
-      final ctrl = e.value;
-      if (ctrl.text.isEmpty) return false;
-      double programVal = 0;
-      if (e.key == '__pos__') {
-        programVal = posToplamiVal;
-      } else {
-        final o = _onlineOdemeler.firstWhere(
-          (o) => o['ad'] == e.key,
-          orElse: () => {},
-        );
-        if (o.isNotEmpty) {
-          programVal = _myDominosOkunan[e.key] ??
-              _parseDouble((o['ctrl'] as TextEditingController).text);
-        }
-      }
-      return (programVal - _parseDouble(ctrl.text)).abs() >= 0.01;
-    }).length;
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -4190,47 +4383,69 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               child: Row(
                 children: [
                   Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _readOnly || _myDominosOkunuyor
-                          ? null
-                          : _myDominosResmiOku,
-                      icon: _myDominosOkunuyor
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : Icon(
-                              _myDominosYuklendi
-                                  ? Icons.check_circle
-                                  : Icons.camera_alt,
-                              size: 15),
-                      label: Text(
-                        _myDominosYuklendi ? 'My Dom. ✓' : 'My Dominos',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _myDominosYuklendi
-                            ? Colors.green[700]
-                            : const Color(0xFF0288D1),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
+                    child: _pulseOkunuyor
+                        ? ElevatedButton.icon(
+                            onPressed: () => setState(() {
+                              _pulseIptalEdildi = true;
+                              _pulseOkunuyor = false;
+                            }),
+                            icon: const Icon(Icons.cancel, size: 15),
+                            label: const Text('İptal',
+                                style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red[700],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          )
+                        : ElevatedButton.icon(
+                            onPressed: _readOnly ? null : _pulseResmiOku,
+                            icon: const Icon(Icons.camera_alt, size: 15),
+                            label: const Text('Pulse Resmi',
+                                style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0288D1),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _readOnly ? null : _pulseResmiOku,
-                      icon: const Icon(Icons.camera_alt, size: 15),
-                      label: const Text('Pulse Resmi',
-                          style: TextStyle(fontSize: 12)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0288D1),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
+                    child: _myDominosOkunuyor
+                        ? ElevatedButton.icon(
+                            onPressed: () => setState(() {
+                              _myDomIptalEdildi = true;
+                              _myDominosOkunuyor = false;
+                            }),
+                            icon: const Icon(Icons.cancel, size: 15),
+                            label: const Text('İptal',
+                                style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red[700],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          )
+                        : ElevatedButton.icon(
+                            onPressed: _readOnly ? null : _myDominosResmiOku,
+                            icon: Icon(
+                                _myDominosYuklendi
+                                    ? Icons.check_circle
+                                    : Icons.camera_alt,
+                                size: 15),
+                            label: Text(
+                              _myDominosYuklendi ? 'My Dom. ✓' : 'My Dominos',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _myDominosYuklendi
+                                  ? Colors.green[700]
+                                  : Colors.green[600],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
                   ),
                 ],
               ),
@@ -4238,7 +4453,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           ),
           const SizedBox(height: 12),
 
-          // Pulse kıyas tablosu
+          // Kıyas tablosu
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -4252,154 +4467,71 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           flex: 3,
                           child: Text('Kalem',
                               style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   color: Colors.grey,
                                   fontWeight: FontWeight.bold))),
-                      const Expanded(
-                          flex: 3,
-                          child: Text('Program',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey,
-                                  fontWeight: FontWeight.bold))),
-                      const SizedBox(width: 6),
-                      SizedBox(
+                      const SizedBox(width: 0),
+                      const SizedBox(
                           width: 80,
                           child: Text('Pulse',
-                              textAlign: TextAlign.right,
+                              textAlign: TextAlign.center,
                               style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[600],
+                                  fontSize: 10,
+                                  color: Colors.blue,
                                   fontWeight: FontWeight.bold))),
                       const SizedBox(width: 6),
                       const SizedBox(
-                          width: 60,
+                          width: 80,
+                          child: Text('Prog./MyDom.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold))),
+                      const SizedBox(width: 6),
+                      const SizedBox(
+                          width: 50,
                           child: Text('Fark',
                               textAlign: TextAlign.right,
                               style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   color: Colors.grey,
                                   fontWeight: FontWeight.bold))),
                     ],
                   ),
-                  const Divider(height: 16),
+                  const Divider(height: 12),
 
-                  // Brüt Satış (sadece gösterim)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue[200]!),
-                    ),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                            flex: 3,
-                            child: Text('Brüt Satış',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold))),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            brutSatis > 0 ? _formatTL(brutSatis) : '—',
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const SizedBox(width: 80),
-                        const SizedBox(width: 6),
-                        const SizedBox(width: 60),
-                      ],
-                    ),
+                  // Brüt Satış
+                  satir(
+                    etiket: 'Brüt Satış',
+                    pulseKey: 'pulseBrut',
+                    myDomVal: brutSatisProgram,
+                    brutSatirMi: true,
                   ),
 
-                  // Banka Parası (otomatik hesap)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.teal[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.teal[200]!),
-                    ),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                            flex: 3,
-                            child: Text('Banka Parası',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold))),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            _formatTL(bankaParasi),
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: bankaParasi >= 0
-                                  ? Colors.teal[700]
-                                  : Colors.red[700],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const SizedBox(
-                            width: 80,
-                            child: Text('otomatik',
-                                textAlign: TextAlign.right,
-                                style: TextStyle(
-                                    fontSize: 10, color: Colors.grey))),
-                        const SizedBox(width: 6),
-                        const SizedBox(width: 60),
-                      ],
-                    ),
+                  // Banka Parası
+                  satir(
+                    etiket: 'Banka Parası',
+                    pulseKey: 'pulseBanka',
+                    myDomVal: bankaParasi,
+                    bankaParasiMi: true,
                   ),
 
-                  // Kredi Kartı / POS
-                  _kiyasSatiri(
-                    etiket: '01. Kredi Kartı',
-                    programVal: posToplamiVal,
-                    kiyasKey: '__pos__',
-                  ),
+                  const Divider(height: 12),
 
-                  // Online ödemeler — Pulse sırasına göre
-                  ...siraliOnline.map((o) {
-                    final ad = o['ad'] as String;
-                    final pulseSira = o['pulseSira'] as int? ?? 99;
-                    final myDomVal = _myDominosOkunan[ad];
-                    final programVal = myDomVal ??
-                        _parseDouble((o['ctrl'] as TextEditingController).text);
-                    return _kiyasSatiri(
-                      etiket: '$pulseSira. $ad',
-                      programVal: programVal,
-                      kiyasKey: ad,
-                    );
-                  }),
-
-                  // Pulse kalemleri — sadece kıyas tablosunda görünür
-                  ..._pulseKalemleri.map((k) {
+                  // Tüm kalemler — pulseSira'ya göre sıralı
+                  ...tumKalemler.map((k) {
+                    final pulseSira = k['pulseSira'] as int;
                     final ad = k['ad'] as String;
-                    final pulseSira = k['pulseSira'] as int? ?? 99;
-                    _pulseKiyasCtrl.putIfAbsent(
-                        ad, () => TextEditingController());
-                    return _kiyasSatiri(
-                      etiket: '$pulseSira. $ad',
-                      programVal: 0,
-                      kiyasKey: ad,
+                    final etiket = '$pulseSira. $ad';
+                    return satir(
+                      etiket: etiket,
+                      pulseKey: k['pulseKey'] as String,
+                      myDomVal: k['myDomVal'] as double,
                     );
                   }),
 
-                  const Divider(height: 16),
+                  const Divider(height: 12),
 
                   // Özet
                   if (farkliSayisi > 0)
@@ -4415,12 +4547,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           Icon(Icons.warning_amber,
                               color: Colors.orange[700], size: 16),
                           const SizedBox(width: 6),
-                          Text(
-                            '$farkliSayisi kalemde fark var — Pulse\'u düzeltin',
-                            style: TextStyle(
-                                color: Colors.orange[800],
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold),
+                          Expanded(
+                            child: Text(
+                              '$farkliSayisi kalemde fark var — Pulse\'u düzeltin',
+                              style: TextStyle(
+                                  color: Colors.orange[800],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
+                            ),
                           ),
                         ],
                       ),
@@ -4440,7 +4574,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           Text('Tüm kalemler eşleşiyor ✓',
                               style: TextStyle(
                                   color: Colors.green[700],
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.bold)),
                         ],
                       ),
@@ -4449,10 +4583,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          _onlineOdemeSection(),
-          const SizedBox(height: 12),
-          _ekrandaGorunenNakitSection(),
           const SizedBox(height: 32),
         ],
       ),
@@ -4487,35 +4617,67 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 90,
+        imageQuality: 60,
+        maxWidth: 1200,
+        maxHeight: 1600,
       );
       if (picked == null) return;
 
+      setState(() => _pulseOkunuyor = true);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Resim okunuyor...'),
-          duration: Duration(seconds: 3),
-        ),
-      );
 
       // Resmi base64'e çevir
       final bytes = await picked.readAsBytes();
       final base64Image = base64Encode(bytes);
       final mimeType = picked.mimeType ?? 'image/jpeg';
 
-      // Online ödeme listesini Firestore'dan al
-      final onlineSnap = await FirebaseFirestore.instance
+      // Tüm ödeme yöntemlerini Firestore'dan al
+      final tumOdemeSnap = await FirebaseFirestore.instance
           .collection('odemeyontemleri')
-          .where('tip', isEqualTo: 'online')
           .where('aktif', isEqualTo: true)
           .get();
 
-      // Kanal listesi: sistem adı → Pulse adı eşleşmesi
-      final kanallar = onlineSnap.docs.map((d) {
+      // Online kanallar
+      // Pulse adı → Sistem adı lookup tabloları
+      final Map<String, String> onlinePulseToSistem = {};
+      final Map<String, String> yemekPulseToSistem = {};
+      final Map<String, String> digerPulseToSistem = {};
+
+      for (final doc in tumOdemeSnap.docs) {
+        final ad = doc.data()['ad'] as String? ?? '';
+        final pulseAdi =
+            (doc.data()['pulseAdi'] as String? ?? '').toUpperCase();
+        final tip = doc.data()['tip'] as String? ?? '';
+        if (ad.isEmpty) continue;
+        final key = pulseAdi.isNotEmpty ? pulseAdi : ad.toUpperCase();
+        if (tip == 'online') onlinePulseToSistem[key] = ad;
+        if (tip == 'yemekKarti') yemekPulseToSistem[key] = ad;
+        if (tip == 'pulseKalemi') digerPulseToSistem[key] = ad;
+      }
+
+      final onlineKanallar =
+          tumOdemeSnap.docs.where((d) => d.data()['tip'] == 'online').map((d) {
         final ad = d.data()['ad'] as String? ?? '';
         final pulseAdi = d.data()['pulseAdi'] as String? ?? '';
-        return pulseAdi.isNotEmpty ? '$ad (Pulse\'daki adı: $pulseAdi)' : ad;
+        return pulseAdi.isNotEmpty ? '$ad (Pulse\'taki adı: $pulseAdi)' : ad;
+      }).join(', ');
+
+      // Yemek kartı kanallar
+      final yemekKanallar = tumOdemeSnap.docs
+          .where((d) => d.data()['tip'] == 'yemekKarti')
+          .map((d) {
+        final ad = d.data()['ad'] as String? ?? '';
+        final pulseAdi = d.data()['pulseAdi'] as String? ?? '';
+        return pulseAdi.isNotEmpty ? '$ad (Pulse\'taki adı: $pulseAdi)' : ad;
+      }).join(', ');
+
+      // Pulse kalemleri
+      final pulseKalemKanallar = tumOdemeSnap.docs
+          .where((d) => d.data()['tip'] == 'pulseKalemi')
+          .map((d) {
+        final ad = d.data()['ad'] as String? ?? '';
+        final pulseAdi = d.data()['pulseAdi'] as String? ?? '';
+        return pulseAdi.isNotEmpty ? '$ad (Pulse\'taki adı: $pulseAdi)' : ad;
       }).join(', ');
 
       // Gemini'ye gönderilecek prompt
@@ -4523,40 +4685,89 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
 Aşağıdaki verileri JSON formatında çıkar:
 - brutsatis: Brüt Satış veya Genel Toplam rakamı (sadece sayı)
 - bankapara: Banka Parası veya Kalan Nakit rakamı (sadece sayı)
+- kredikart: 01.KREDI KARTI veya Kredi Kartı toplamı (sadece sayı)
 - online: her online ödeme kanalı için {ad, tutar} listesi.
-  Kanallar: $kanallar
-  Pulse'daki adını bul, sistem adını kullan.
+  Kanallar: $onlineKanallar
+  Pulse'taki adını bul, sistem adını kullan.
+- yemek: her yemek kartı için {ad, tutar} listesi.
+  Kanallar: $yemekKanallar
+  Pulse'taki adını bul, sistem adını kullan.
+- diger: diğer pulse kalemleri için {ad, tutar} listesi.
+  Kanallar: $pulseKalemKanallar
+  Pulse'taki adını bul, sistem adını kullan.
 
 Sadece JSON dön, başka açıklama yazma. Örnek:
-{"brutsatis": 96614.57, "bankapara": 10860.00, "online": [{"ad": "Getir Online", "tutar": 1819.00}]}
+{"brutsatis": 96614.57, "bankapara": 10860.00, "kredikart": 13697.00, "online": [{"ad": "Getir Online", "tutar": 1819.00}], "yemek": [{"ad": "Multinet", "tutar": 430.00}], "diger": []}
 
 Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
-      // Gemini API isteği
-      final response = await http.post(
-        Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=$apiKey',
-        ),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
+      // İptal kontrolü
+      if (_pulseIptalEdildi) {
+        setState(() => _pulseOkunuyor = false);
+        return;
+      }
+
+      // Gemini API isteği — 503 olursa 1 kez retry
+      late http.Response response;
+      for (int deneme = 1; deneme <= 2; deneme++) {
+        try {
+          response = await http.post(
+            Uri.parse(
+              'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=$apiKey',
+            ),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'contents': [
                 {
-                  'inline_data': {
-                    'mime_type': mimeType,
-                    'data': base64Image,
-                  }
-                },
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {
-            'temperature': 0,
+                  'parts': [
+                    {
+                      'inline_data': {
+                        'mime_type': mimeType,
+                        'data': base64Image,
+                      }
+                    },
+                    {'text': prompt}
+                  ]
+                }
+              ],
+              'generationConfig': {
+                'temperature': 0,
+              }
+            }),
+          );
+        } catch (e) {
+          setState(() => _pulseOkunuyor = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text('Bağlantı hatası: $e'),
+                  backgroundColor: Colors.red),
+            );
           }
-        }),
-      );
+          return;
+        }
+
+        if (_pulseIptalEdildi) {
+          setState(() => _pulseOkunuyor = false);
+          return;
+        }
+
+        if (response.statusCode == 503 && deneme == 1) {
+          // 503 → kullanıcıya bildir, 5 saniye bekle, tekrar dene
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Sunucu meşgul, tekrar deneniyor...'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+          await Future.delayed(const Duration(seconds: 5));
+          continue;
+        }
+        break; // Başarılı veya 503 dışı hata
+      }
 
       if (response.statusCode != 200) {
         if (mounted) {
@@ -4589,122 +4800,102 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
       // JSON parse
       final cleanText = text.replaceAll(RegExp(r'```json|```'), '').trim();
+      // ignore: avoid_print
+      print('GEMINI PULSE YANIT: $cleanText');
       final Map<String, dynamic> geminiOkunan = jsonDecode(cleanText);
 
-      // Düz Map'e çevir
-      final Map<String, double> okunan = {};
+      // Değerleri direkt uygula — setState dışında ctrl hazırla
+      if (!mounted) return;
 
+      // Önce ctrl'leri hazırla (setState dışında)
       if (geminiOkunan['brutsatis'] != null) {
-        okunan['__gunlukSatis__'] =
-            (geminiOkunan['brutsatis'] as num).toDouble();
+        _pulseKiyasCtrl.putIfAbsent('pulseBrut', () => TextEditingController());
       }
-      if (geminiOkunan['bankapara'] != null) {
-        okunan['__ekrandaNakit__'] =
-            (geminiOkunan['bankapara'] as num).toDouble();
+      if (geminiOkunan['kredikart'] != null) {
+        _pulseKiyasCtrl.putIfAbsent('pulsePos', () => TextEditingController());
       }
       if (geminiOkunan['online'] != null) {
         for (final o in (geminiOkunan['online'] as List)) {
-          final ad = o['ad'] as String? ?? '';
-          final tutar = (o['tutar'] as num? ?? 0).toDouble();
-          if (ad.isNotEmpty && tutar > 0) okunan[ad] = tutar;
+          final pulseAd = (o['ad'] as String? ?? '').toUpperCase();
+          final sistemAd = onlinePulseToSistem[pulseAd];
+          if (sistemAd != null)
+            _pulseKiyasCtrl.putIfAbsent(
+                sistemAd, () => TextEditingController());
+        }
+      }
+      if (geminiOkunan['yemek'] != null) {
+        for (final y in (geminiOkunan['yemek'] as List)) {
+          final pulseAd = (y['ad'] as String? ?? '').toUpperCase();
+          final sistemAd = yemekPulseToSistem[pulseAd];
+          if (sistemAd != null)
+            _pulseKiyasCtrl.putIfAbsent(
+                'yemek_$sistemAd', () => TextEditingController());
+        }
+      }
+      if (geminiOkunan['diger'] != null) {
+        for (final d in (geminiOkunan['diger'] as List)) {
+          final pulseAd = (d['ad'] as String? ?? '').toUpperCase();
+          final sistemAd = digerPulseToSistem[pulseAd];
+          if (sistemAd != null)
+            _pulseKiyasCtrl.putIfAbsent(
+                sistemAd, () => TextEditingController());
         }
       }
 
-      if (okunan.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                  'Eşleşen veri bulunamadı. Pulse ekranı net çekilmiş mi?'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
-
-      // Onay ekranı göster
-      if (!mounted) return;
-      final onaylandi = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.camera_alt, color: Color(0xFF0288D1)),
-              SizedBox(width: 8),
-              Text('Okunan Veriler'),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Aşağıdaki veriler okundu. Kontrol edip onaylayın:',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
-                ),
-                const SizedBox(height: 12),
-                ...okunan.entries.map((e) {
-                  String ad = e.key;
-                  if (ad == '__gunlukSatis__') ad = 'Günlük Satış';
-                  if (ad == '__ekrandaNakit__') ad = 'Ekranda Görünen Nakit';
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(ad, style: const TextStyle(fontSize: 13)),
-                        ),
-                        Text(
-                          _formatTL(e.value),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF0288D1),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('İptal', style: TextStyle(color: Colors.red)),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Onayla ve Doldur'),
-            ),
-          ],
-        ),
-      );
-
-      if (onaylandi != true || !mounted) return;
-
-      // Değerleri uygula
+      // Sonra setState ile değerleri yaz
       setState(() {
-        for (var o in _onlineOdemeler) {
-          final ad = o['ad'] as String;
-          if (okunan.containsKey(ad)) {
-            (o['ctrl'] as TextEditingController).text =
-                _formatTL(okunan[ad]!).replaceAll(' ₺', '');
+        if (geminiOkunan['brutsatis'] != null) {
+          final val = (geminiOkunan['brutsatis'] as num).toDouble();
+          _pulseKiyasCtrl['pulseBrut']!.text =
+              _formatTL(val).replaceAll(' ₺', '');
+          _gunlukSatisCtrl.text = _formatTL(val).replaceAll(' ₺', '');
+        }
+        if (geminiOkunan['kredikart'] != null) {
+          final val = (geminiOkunan['kredikart'] as num).toDouble();
+          _pulseKiyasCtrl['pulsePos']!.text =
+              _formatTL(val).replaceAll(' ₺', '');
+        }
+        if (geminiOkunan['online'] != null) {
+          for (final o in (geminiOkunan['online'] as List)) {
+            final pulseAd = (o['ad'] as String? ?? '').toUpperCase();
+            final sistemAd = onlinePulseToSistem[pulseAd];
+            final tutar = (o['tutar'] as num? ?? 0).toDouble();
+            if (sistemAd != null &&
+                tutar > 0 &&
+                _pulseKiyasCtrl.containsKey(sistemAd)) {
+              _pulseKiyasCtrl[sistemAd]!.text =
+                  _formatTL(tutar).replaceAll(' ₺', '');
+            }
           }
         }
-        if (okunan.containsKey('__gunlukSatis__')) {
-          _gunlukSatisCtrl.text =
-              _formatTL(okunan['__gunlukSatis__']!).replaceAll(' ₺', '');
+        if (geminiOkunan['yemek'] != null) {
+          for (final y in (geminiOkunan['yemek'] as List)) {
+            final pulseAd = (y['ad'] as String? ?? '').toUpperCase();
+            final sistemAd = yemekPulseToSistem[pulseAd];
+            final tutar = (y['tutar'] as num? ?? 0).toDouble();
+            final key = 'yemek_$sistemAd';
+            if (sistemAd != null &&
+                tutar > 0 &&
+                _pulseKiyasCtrl.containsKey(key)) {
+              _pulseKiyasCtrl[key]!.text =
+                  _formatTL(tutar).replaceAll(' ₺', '');
+            }
+          }
         }
-        if (okunan.containsKey('__ekrandaNakit__')) {
-          _ekrandaGorunenNakitCtrl.text =
-              _formatTL(okunan['__ekrandaNakit__']!).replaceAll(' ₺', '');
+        if (geminiOkunan['diger'] != null) {
+          for (final d in (geminiOkunan['diger'] as List)) {
+            final pulseAd = (d['ad'] as String? ?? '').toUpperCase();
+            final sistemAd = digerPulseToSistem[pulseAd];
+            final tutar = (d['tutar'] as num? ?? 0).toDouble();
+            if (sistemAd != null &&
+                tutar > 0 &&
+                _pulseKiyasCtrl.containsKey(sistemAd)) {
+              _pulseKiyasCtrl[sistemAd]!.text =
+                  _formatTL(tutar).replaceAll(' ₺', '');
+            }
+          }
         }
+        _pulseOkunuyor = false;
         _degisiklikVar = true;
         if (_duzenlemeAcik) _gercekDegisiklikVar = true;
       });
@@ -4712,13 +4903,14 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${okunan.length} alan dolduruldu ✓'),
+          const SnackBar(
+            content: Text('Pulse verileri okundu ✓'),
             backgroundColor: Colors.green,
           ),
         );
       }
     } catch (e) {
+      setState(() => _pulseOkunuyor = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4758,7 +4950,9 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 90,
+        imageQuality: 60,
+        maxWidth: 1200,
+        maxHeight: 1600,
       );
       if (picked == null) return;
 
@@ -4807,28 +5001,69 @@ Aşağıdaki JSON formatında döndür:
 Sadece JSON döndür, başka açıklama yazma.
 Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
-      final response = await http.post(
-        Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=$apiKey',
-        ),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
+      // İptal kontrolü
+      if (_myDomIptalEdildi) {
+        setState(() => _myDominosOkunuyor = false);
+        return;
+      }
+
+      late http.Response response;
+      for (int deneme = 1; deneme <= 2; deneme++) {
+        try {
+          response = await http.post(
+            Uri.parse(
+              'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=$apiKey',
+            ),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'contents': [
                 {
-                  'inline_data': {
-                    'mime_type': mimeType,
-                    'data': base64Image,
-                  }
-                },
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {'temperature': 0},
-        }),
-      );
+                  'parts': [
+                    {
+                      'inline_data': {
+                        'mime_type': mimeType,
+                        'data': base64Image,
+                      }
+                    },
+                    {'text': prompt}
+                  ]
+                }
+              ],
+              'generationConfig': {'temperature': 0},
+            }),
+          );
+        } catch (e) {
+          setState(() => _myDominosOkunuyor = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text('Bağlantı hatası: $e'),
+                  backgroundColor: Colors.red),
+            );
+          }
+          return;
+        }
+
+        if (_myDomIptalEdildi) {
+          setState(() => _myDominosOkunuyor = false);
+          return;
+        }
+
+        if (response.statusCode == 503 && deneme == 1) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Sunucu meşgul, tekrar deneniyor...'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+          await Future.delayed(const Duration(seconds: 5));
+          continue;
+        }
+        break;
+      }
 
       setState(() => _myDominosOkunuyor = false);
 
@@ -4884,9 +5119,18 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         return;
       }
 
+      // Ctrl'leri setState dışında hazırla
+      for (final key in yeniOkunan.keys) {
+        _myDomKiyasCtrl.putIfAbsent(key, () => TextEditingController());
+      }
+
       setState(() {
         _myDominosOkunan = yeniOkunan;
         _myDominosYuklendi = true;
+        for (final entry in yeniOkunan.entries) {
+          _myDomKiyasCtrl[entry.key]!.text =
+              _formatTL(entry.value).replaceAll(' ₺', '');
+        }
       });
 
       if (mounted) {
@@ -4950,15 +5194,24 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               _onlineOdemeler.add({
                 'ad': ad,
                 'ctrl': TextEditingController(),
-                'pulseSira': doc.data()['pulseSira'] ?? 99,
+                'pulseSira': (doc.data()['pulseSira'] as num?)?.toInt() ?? 99,
                 'digerEkranAdi': doc.data()['digerEkranAdi'] ?? '',
               });
+            } else {
+              final idx = _onlineOdemeler.indexWhere((o) => o['ad'] == ad);
+              if (idx >= 0) {
+                _onlineOdemeler[idx]['pulseSira'] =
+                    (doc.data()['pulseSira'] as num?)?.toInt() ?? 99;
+                _onlineOdemeler[idx]['digerEkranAdi'] =
+                    doc.data()['digerEkranAdi'] ?? '';
+              }
             }
           }
+          // pulseSira'ya göre sırala
           _onlineOdemeler.sort((a, b) {
-            final ia = siraliAdlar.indexOf(a['ad'] as String);
-            final ib = siraliAdlar.indexOf(b['ad'] as String);
-            return ia.compareTo(ib);
+            final sa = (a['pulseSira'] as int? ?? 99);
+            final sb = (b['pulseSira'] as int? ?? 99);
+            return sa.compareTo(sb);
           });
 
           // Pulse kalemleri
@@ -4970,6 +5223,17 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                   })
               .where((m) => (m['ad'] as String).isNotEmpty)
               .toList();
+
+          // Online ve pulse kalem ctrl'lerini hazırla
+          for (var o in _onlineOdemeler) {
+            final ad = o['ad'] as String;
+            _pulseKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
+            _myDomKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
+          }
+          for (var k in _pulseKalemleri) {
+            final ad = k['ad'] as String;
+            _pulseKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
+          }
         });
       }
     } catch (_) {}
@@ -4988,6 +5252,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
   void dispose() {
     _tabController.dispose();
     for (var c in _pulseKiyasCtrl.values) c.dispose();
+    for (var c in _myDomKiyasCtrl.values) c.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _kilitBirak();
     _kilitTimer?.cancel();
@@ -6669,6 +6934,26 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         _sistemYemekKartiCtrl[c]!.text = _sifirTemizle(sistemYemek?[c]);
       }
       _gunlukSatisCtrl.text = _sifirTemizle(data['gunlukSatisToplami']);
+
+      // Pulse kıyas verileri yükle
+      final pulseKiyas =
+          (data['pulseKiyasVerileri'] as Map<String, dynamic>?) ?? {};
+      for (var e in pulseKiyas.entries) {
+        _pulseKiyasCtrl.putIfAbsent(e.key, () => TextEditingController());
+        _pulseKiyasCtrl[e.key]!.text = e.value.toString();
+      }
+      // My Dominos kıyas verileri yükle
+      final myDomKiyas =
+          (data['myDomKiyasVerileri'] as Map<String, dynamic>?) ?? {};
+      for (var e in myDomKiyas.entries) {
+        _myDomKiyasCtrl.putIfAbsent(e.key, () => TextEditingController());
+        _myDomKiyasCtrl[e.key]!.text = e.value.toString();
+        // _myDominosOkunan da güncelle
+        final val = double.tryParse(
+            e.value.toString().replaceAll('.', '').replaceAll(',', '.'));
+        if (val != null && val > 0) _myDominosOkunan[e.key] = val;
+      }
+      if (myDomKiyas.isNotEmpty) _myDominosYuklendi = true;
       // Online ödemeler
       final onlineList = (data['onlineOdemeler'] as List?)?.cast<Map>() ?? [];
       for (var o in _onlineOdemeler) {
@@ -6900,6 +7185,11 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         (o['ctrl'] as TextEditingController).clear();
       }
       _gunlukSatisCtrl.clear();
+      // Pulse ve MyDom kıyas verilerini temizle
+      for (var c in _pulseKiyasCtrl.values) c.clear();
+      for (var c in _myDomKiyasCtrl.values) c.clear();
+      _myDominosOkunan.clear();
+      _myDominosYuklendi = false;
 
       for (var h in _harcamalar) h.dispose();
       _harcamalar.clear();
@@ -7638,6 +7928,16 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                 })
             .toList(),
         'gunlukSatisToplami': _parseDouble(_gunlukSatisCtrl.text),
+        'pulseKiyasVerileri': Map.fromEntries(
+          _pulseKiyasCtrl.entries
+              .where((e) => e.value.text.isNotEmpty)
+              .map((e) => MapEntry(e.key, e.value.text)),
+        ),
+        'myDomKiyasVerileri': Map.fromEntries(
+          _myDomKiyasCtrl.entries
+              .where((e) => e.value.text.isNotEmpty)
+              .map((e) => MapEntry(e.key, e.value.text)),
+        ),
         'posFarki': _posFarki,
         'harcamalar': _harcamalar
             .map(
