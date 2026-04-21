@@ -3110,6 +3110,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   bool _pulseOkundu = false; // Pulse başarıyla okundu mu
   bool _myDomOkundu = false; // MyDom başarıyla okundu mu
   bool _pulseKontrolOnaylandi = false; // "Pulse kontrol edildi" onayı
+  final Set<String> _acikSatirlar = {}; // ✏ ile açılan eşleşen satırlar
   String _okumaMesaji = ''; // Alt banttaki mesaj
   final Map<String, TextEditingController> _pulseKiyasCtrl =
       {}; // Pulse manuel giriş
@@ -3762,6 +3763,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             (d) => {
               'cins': d['cins'],
               'miktar': _parseDouble((d['ctrl'] as TextEditingController).text),
+              'aciklama':
+                  (d['aciklamaCtrl'] as TextEditingController?)?.text.trim() ??
+                      '',
             },
           )
           .where((d) => (d['miktar'] as double) > 0)
@@ -4076,6 +4080,16 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     } catch (_) {}
   }
 
+  // ── Chip sekme yardımcısı ────────────────────────────────────────────────────
+  Widget _chipTab(String label) {
+    return Tab(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Text(label),
+      ),
+    );
+  }
+
   // ── Günü Kapat / Düzenlemeyi Aç Butonu ──────────────────────────────────────
   Widget _gunuKapatButonu() {
     if (_gunuKapatildi && !_duzenlemeAcik) {
@@ -4277,7 +4291,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     }
 
     // Banka Parası = Brüt Satış - Sonuç toplamları (tumKalemler sonradan hesaplanacak)
-    final brutSatisProgram = _parseDouble(_gunlukSatisCtrl.text);
+    // Brüt Satış: önce Pulse kutusundan (manuel düzeltilebilir), yoksa üst bardaki değer
+    final brutSatisProgram = _pulseKiyasCtrl.containsKey('pulseBrut') &&
+            _pulseKiyasCtrl['pulseBrut']!.text.isNotEmpty
+        ? _parseDouble(_pulseKiyasCtrl['pulseBrut']!.text)
+        : _parseDouble(_gunlukSatisCtrl.text);
 
     // Tüm kalemleri tek listede birleştir — pulseSira'ya göre sırala
     // Her kalem: {tip, ad, pulseSira, myDomVal, pulseKey}
@@ -4349,10 +4367,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     });
 
     // Banka Parası = Brüt Satış - Sonuç toplamları (effectiveMyDom değerleri)
+    // Brüt Satış kalemi listedeyse çıkarma hesabına dahil etme — zaten brutSatisProgram olarak kullanılıyor
     double toplamSonuc = 0;
     for (final k in tumKalemler) {
       final pulseKey = k['pulseKey'] as String;
       final tipBanka = k['tip'] as String;
+      // Brüt Satış kalemini atla — brutSatisProgram zaten bu değer
+      final adLowerBanka = (k['ad'] as String).toLowerCase();
+      if (adLowerBanka.contains('brüt') || adLowerBanka.contains('brut'))
+        continue;
       final isPosOrYemekBanka = tipBanka == 'pos' || tipBanka == 'yemek';
       final myDomValBanka =
           tipBanka == 'pos' ? _toplamPos : (k['myDomVal'] as double);
@@ -4367,9 +4390,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     final bankaParasi = brutSatisProgram - toplamSonuc;
 
     // Fark sayısı
-    // farkliSayisi tumKalemler üzerinden hesapla
+    // farkliSayisi tumKalemler üzerinden hesapla (Brüt Satış hariç)
     int farkliSayisi = 0;
     for (final k in tumKalemler) {
+      final adLowerK = (k['ad'] as String).toLowerCase();
+      if (adLowerK.contains('brüt') || adLowerK.contains('brut')) continue;
       final pulseKey = k['pulseKey'] as String;
       final tipK = k['tip'] as String;
       final myDomValK = tipK == 'pos' ? _toplamPos : (k['myDomVal'] as double);
@@ -4685,7 +4710,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: _myDomOkundu
                                       ? Colors.green[700]
-                                      : Colors.green[600],
+                                      : const Color(0xFFFF8F00),
                                   foregroundColor: Colors.white,
                                   padding:
                                       const EdgeInsets.symmetric(vertical: 10),
@@ -4794,234 +4819,762 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               const SizedBox(height: 10),
               const SizedBox(height: 10),
 
-              // Tablo — LayoutBuilder ile ekrana sığdır
-              LayoutBuilder(builder: (ctx, constraints) {
-                final totalW = constraints.maxWidth - 12; // container padding
-                final wPulse = (totalW * 0.18).floorToDouble();
-                final wMyDom = (totalW * 0.18).floorToDouble();
-                final wFark = (totalW * 0.11).floorToDouble();
-                final wSonuc = (totalW * 0.15).floorToDouble();
-                final wKalem = totalW - wPulse - wMyDom - wFark - wSonuc - 12;
+              // ── Kıyaslama listesi — fark olanlar üstte ──
+              Builder(builder: (ctx) {
+                // Kalemler: brüt satış hariç, fark olanlar önce
+                final gorunenler = tumKalemler.where((k) {
+                  final adL = (k['ad'] as String).toLowerCase();
+                  return !adL.contains('brüt') && !adL.contains('brut');
+                }).toList();
 
-                Widget inputField(
-                    TextEditingController? ctrl, Color fillColor) {
+                Widget pulseInputW(TextEditingController ctrl,
+                    {bool enabled = true}) {
                   return TextField(
-                    controller: ctrl ?? TextEditingController(),
-                    enabled: !_readOnly,
+                    controller: ctrl,
+                    enabled: !_readOnly && enabled,
                     textAlign: TextAlign.right,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [BinAraciFormatter()],
-                    style: const TextStyle(fontSize: 10),
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: enabled
+                            ? const Color(0xFF1D4ED8)
+                            : Colors.grey[500]),
                     decoration: InputDecoration(
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 3, vertical: 6),
+                          horizontal: 8, vertical: 8),
                       hintText: '0,00',
-                      hintStyle: const TextStyle(fontSize: 9),
                       border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(5)),
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: BorderSide(
+                              color: enabled
+                                  ? const Color(0xFF93C5FD)
+                                  : Colors.grey[300]!)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: BorderSide(
+                              color: enabled
+                                  ? const Color(0xFF93C5FD)
+                                  : Colors.grey[300]!,
+                              width: 1.5)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1D4ED8), width: 1.5)),
                       filled: true,
-                      fillColor: fillColor,
+                      fillColor:
+                          enabled ? const Color(0xFFEFF6FF) : Colors.grey[100],
                     ),
                     onChanged: (_) => setState(() {}),
                   );
                 }
 
-                return Column(children: [
-                  // Başlık
-                  Container(
-                    color: Colors.grey[100],
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-                    child: Row(children: [
-                      SizedBox(
-                          width: wKalem,
-                          child: const Text('Kalem',
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.grey))),
-                      SizedBox(
-                          width: wPulse,
-                          child: const Text('Pulse',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.blue))),
-                      const SizedBox(width: 3),
-                      SizedBox(
-                          width: wMyDom,
-                          child: const Text('Prog/MyDom',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green))),
-                      const SizedBox(width: 3),
-                      SizedBox(
-                          width: wFark,
-                          child: const Text('Fark',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.grey))),
-                      const SizedBox(width: 3),
-                      SizedBox(
-                          width: wSonuc,
-                          child: const Text('Sonuç',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.orange))),
-                    ]),
-                  ),
-                  ...tumKalemler.map((k) {
-                    final pulseKey = k['pulseKey'] as String;
-                    final ad = k['ad'] as String;
-                    final pulseSira = k['pulseSira'] as int;
-                    final tip = k['tip'] as String;
-                    final myDomVal =
-                        tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-                    // POS, yemek ve program değeri olan pulseKalemi için sabit göster
-                    final isPosOrYemek = tip == 'pos' ||
-                        tip == 'yemek' ||
-                        (tip == 'pulseKalemi' && myDomVal > 0);
-                    final pulseCtrl =
-                        _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
-                    final myDomCtrl = _myDomKiyasCtrl[pulseKey];
-                    final effectiveMyDom = isPosOrYemek
-                        ? myDomVal
-                        : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
-                            ? _parseDouble(myDomCtrl.text)
-                            : myDomVal);
-                    final pulseVal = _parseDouble(pulseCtrl.text);
-                    final fark = effectiveMyDom - pulseVal;
-                    // Fark: program değeri varsa her zaman göster (pulse boş = 0 kabul)
-                    final eslesme = fark.abs() < 0.01 &&
-                        (pulseCtrl.text.isNotEmpty || effectiveMyDom == 0);
-                    final farkVar = !eslesme && effectiveMyDom > 0;
+                Widget myDomInputW(TextEditingController? ctrl,
+                    {bool enabled = true}) {
+                  return TextField(
+                    controller: ctrl ?? TextEditingController(),
+                    enabled: !_readOnly && enabled,
+                    textAlign: TextAlign.right,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [BinAraciFormatter()],
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: enabled
+                            ? const Color(0xFFC2410C)
+                            : Colors.grey[500]),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 8),
+                      hintText: '0,00',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: BorderSide(
+                              color: enabled
+                                  ? const Color(0xFFFDBA74)
+                                  : Colors.grey[300]!)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: BorderSide(
+                              color: enabled
+                                  ? const Color(0xFFFDBA74)
+                                  : Colors.grey[300]!,
+                              width: 1.5)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: const BorderSide(
+                              color: Color(0xFFC2410C), width: 1.5)),
+                      filled: true,
+                      fillColor:
+                          enabled ? const Color(0xFFFFF7ED) : Colors.grey[100],
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  );
+                }
 
+                Widget _satir(Map<String, dynamic> k) {
+                  final ad = k['ad'] as String;
+                  final pulseKey = k['pulseKey'] as String;
+                  final pulseSira = k['pulseSira'] as int;
+                  final tip = k['tip'] as String;
+                  final myDomVal =
+                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
+                  final isPosOrYemek = tip == 'pos' ||
+                      tip == 'yemek' ||
+                      (tip == 'pulseKalemi' && myDomVal > 0);
+                  final isOnline = tip == 'online';
+                  final pulseCtrl =
+                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
+                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
+                  final effectiveMyDom = isPosOrYemek
+                      ? myDomVal
+                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
+                          ? _parseDouble(myDomCtrl.text)
+                          : myDomVal);
+                  final pulseVal = _parseDouble(pulseCtrl.text);
+                  final fark = effectiveMyDom - pulseVal;
+                  final eslesme = fark.abs() < 0.01 &&
+                      (pulseCtrl.text.isNotEmpty || effectiveMyDom == 0);
+                  final pulseBos =
+                      pulseCtrl.text.isEmpty && effectiveMyDom == 0;
+                  final acik = _acikSatirlar.contains(pulseKey);
+
+                  // ── FARK VAR ──
+                  if (!eslesme && !pulseBos) {
+                    final ekle = fark > 0;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.red.withOpacity(0.05),
+                              blurRadius: 4)
+                        ],
+                      ),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Üst: kalem adı + etiket
+                            Container(
+                              decoration: const BoxDecoration(
+                                border: Border(
+                                    left: BorderSide(
+                                        color: Color(0xFFEF4444), width: 4)),
+                                borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(10),
+                                    topRight: Radius.circular(10)),
+                              ),
+                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 5),
+                              child: Row(children: [
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      Text('$pulseSira. $ad',
+                                          style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF1E293B))),
+                                      Text(
+                                          isPosOrYemek
+                                              ? (tip == 'pos'
+                                                  ? 'POS'
+                                                  : 'Yemek Kartı')
+                                              : 'Online',
+                                          style: const TextStyle(
+                                              fontSize: 9,
+                                              color: Color(0xFF94A3B8))),
+                                    ])),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: ekle
+                                        ? const Color(0xFFF0FDF4)
+                                        : const Color(0xFFFEF2F2),
+                                    borderRadius: BorderRadius.circular(5),
+                                    border: Border.all(
+                                        color: ekle
+                                            ? const Color(0xFF86EFAC)
+                                            : const Color(0xFFFCA5A5)),
+                                  ),
+                                  child: Text(
+                                    ekle
+                                        ? '+ ${_formatTL(fark).replaceAll(' ₺', '')} ekle'
+                                        : '− ${_formatTL(fark.abs()).replaceAll(' ₺', '')} çıkar',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: ekle
+                                            ? const Color(0xFF15803D)
+                                            : const Color(0xFFDC2626)),
+                                  ),
+                                ),
+                              ]),
+                            ),
+                            // Alt: kutular
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+                              child: Row(children: [
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      const Text('PULSE — düzenle',
+                                          style: TextStyle(
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF1D4ED8))),
+                                      const SizedBox(height: 2),
+                                      pulseInputW(pulseCtrl),
+                                    ])),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text('↔',
+                                      style: TextStyle(
+                                          fontSize: 14,
+                                          color: Color(0xFF94A3B8))),
+                                ),
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      Text(
+                                        isPosOrYemek
+                                            ? 'PROGRAM — sabit'
+                                            : 'MYDOM — düzenle',
+                                        style: TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.w700,
+                                            color: isPosOrYemek
+                                                ? const Color(0xFF64748B)
+                                                : const Color(0xFFC2410C)),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      isPosOrYemek
+                                          ? Container(
+                                              width: double.infinity,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 8),
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey[100],
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                                border: Border.all(
+                                                    color: Colors.grey[300]!),
+                                              ),
+                                              child: Text(
+                                                effectiveMyDom > 0
+                                                    ? _formatTL(effectiveMyDom)
+                                                        .replaceAll(' ₺', '')
+                                                    : '0,00',
+                                                textAlign: TextAlign.right,
+                                                style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Colors.grey[600]),
+                                              ),
+                                            )
+                                          : myDomInputW(myDomCtrl),
+                                    ])),
+                              ]),
+                            ),
+                            if (isPosOrYemek)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.only(left: 14, bottom: 8),
+                                child: Text(
+                                  tip == 'pos'
+                                      ? '⚠ Kredi kartını POS & Y. Kartı sekmesinden düzelt'
+                                      : '⚠ Yemek kartını POS & Y. Kartı sekmesinden düzelt',
+                                  style: const TextStyle(
+                                      fontSize: 9,
+                                      color: Color(0xFF94A3B8),
+                                      fontStyle: FontStyle.italic),
+                                ),
+                              ),
+                          ]),
+                    );
+                  }
+
+                  // ── GİRİLMEMİŞ ──
+                  if (pulseBos) {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 3),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: eslesme
-                            ? Colors.green[50]
-                            : (pulseCtrl.text.isNotEmpty && fark > 0.01)
-                                ? Colors.green[50]
-                                : (pulseCtrl.text.isNotEmpty && fark < -0.01)
-                                    ? Colors.red[50]
-                                    : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(5),
-                        border: Border.all(
-                            color: eslesme
-                                ? Colors.green[200]!
-                                : (pulseCtrl.text.isNotEmpty && fark > 0.01)
-                                    ? Colors.green[200]!
-                                    : (pulseCtrl.text.isNotEmpty &&
-                                            fark < -0.01)
-                                        ? Colors.red[200]!
-                                        : Colors.grey[200]!),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(8),
+                          bottomLeft: Radius.circular(8),
+                          topRight: Radius.circular(8),
+                          bottomRight: Radius.circular(8),
+                        ),
+                        border: Border(
+                            left:
+                                BorderSide(color: Color(0xFFE2E8F0), width: 4)),
                       ),
-                      child: Row(children: [
-                        SizedBox(
-                            width: wKalem,
-                            child: Text('$pulseSira. $ad',
-                                style: const TextStyle(
-                                    fontSize: 10, fontWeight: FontWeight.w500),
-                                overflow: TextOverflow.ellipsis)),
-                        SizedBox(
-                            width: wPulse,
-                            child: inputField(pulseCtrl, Colors.blue[50]!)),
-                        const SizedBox(width: 3),
-                        SizedBox(
-                          width: wMyDom,
-                          child: isPosOrYemek
-                              ? Container(
-                                  height: 30,
-                                  alignment: Alignment.centerRight,
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 3),
-                                  decoration: BoxDecoration(
-                                      color: Colors.green[50],
-                                      border:
-                                          Border.all(color: Colors.green[200]!),
-                                      borderRadius: BorderRadius.circular(5)),
-                                  child: Text(
-                                      effectiveMyDom > 0
-                                          ? _formatTL(effectiveMyDom)
-                                              .replaceAll(' ₺', '')
-                                          : '0,00',
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        child: Row(children: [
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text('$pulseSira. $ad',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF94A3B8))),
+                                Text(
+                                    isOnline
+                                        ? 'Online'
+                                        : isPosOrYemek
+                                            ? 'Program'
+                                            : '',
+                                    style: const TextStyle(
+                                        fontSize: 9, color: Color(0xFFCBD5E1))),
+                              ])),
+                          SizedBox(width: 90, child: pulseInputW(pulseCtrl)),
+                          const SizedBox(width: 8),
+                          const Text('—',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFFCBD5E1),
+                                  fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
+                    );
+                  }
+
+                  // ── EŞLEŞİYOR ──
+                  if (acik) {
+                    // Açılmış — sarı şerit, her iki kutu düzenlenebilir
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFBBF24)),
+                      ),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              decoration: const BoxDecoration(
+                                border: Border(
+                                    left: BorderSide(
+                                        color: Color(0xFFF59E0B), width: 4)),
+                                borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(10),
+                                    topRight: Radius.circular(10)),
+                              ),
+                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 5),
+                              child: Row(children: [
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      Text('$pulseSira. $ad',
+                                          style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700)),
+                                      const Text('Düzenleme modu',
+                                          style: TextStyle(
+                                              fontSize: 9,
+                                              color: Color(0xFFF59E0B))),
+                                    ])),
+                                GestureDetector(
+                                  onTap: () => setState(
+                                      () => _acikSatirlar.remove(pulseKey)),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                        color: Colors.grey[100],
+                                        borderRadius: BorderRadius.circular(5)),
+                                    child: const Text('✕ Kapat',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Color(0xFF64748B))),
+                                  ),
+                                ),
+                              ]),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+                              child: Row(children: [
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      const Text('PULSE — düzenle',
+                                          style: TextStyle(
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF1D4ED8))),
+                                      const SizedBox(height: 2),
+                                      pulseInputW(pulseCtrl),
+                                    ])),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text('↔',
                                       style: TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.green[800])),
-                                )
-                              : inputField(myDomCtrl, Colors.green[50]!),
-                        ),
-                        const SizedBox(width: 3),
+                                          fontSize: 14,
+                                          color: Color(0xFF94A3B8))),
+                                ),
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      Text(
+                                        isPosOrYemek
+                                            ? 'PROGRAM — sabit'
+                                            : 'MYDOM — düzenle',
+                                        style: TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.w700,
+                                            color: isPosOrYemek
+                                                ? const Color(0xFF64748B)
+                                                : const Color(0xFFC2410C)),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      isPosOrYemek
+                                          ? Container(
+                                              width: double.infinity,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 8),
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey[100],
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                                border: Border.all(
+                                                    color: Colors.grey[300]!),
+                                              ),
+                                              child: Text(
+                                                effectiveMyDom > 0
+                                                    ? _formatTL(effectiveMyDom)
+                                                        .replaceAll(' ₺', '')
+                                                    : '0,00',
+                                                textAlign: TextAlign.right,
+                                                style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Colors.grey[600]),
+                                              ),
+                                            )
+                                          : myDomInputW(myDomCtrl),
+                                    ])),
+                              ]),
+                            ),
+                            if (isPosOrYemek)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.only(left: 14, bottom: 8),
+                                child: Text(
+                                  tip == 'pos'
+                                      ? '⚠ Kredi kartını POS & Y. Kartı sekmesinden düzelt'
+                                      : '⚠ Yemek kartını POS & Y. Kartı sekmesinden düzelt',
+                                  style: const TextStyle(
+                                      fontSize: 9,
+                                      color: Color(0xFF94A3B8),
+                                      fontStyle: FontStyle.italic),
+                                ),
+                              ),
+                          ]),
+                    );
+                  }
+
+                  // Kapalı eşleşen — kompakt
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 3),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(8),
+                        bottomLeft: Radius.circular(8),
+                        topRight: Radius.circular(8),
+                        bottomRight: Radius.circular(8),
+                      ),
+                      border: Border(
+                          left: BorderSide(color: Color(0xFF22C55E), width: 4)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 7),
+                      child: Row(children: [
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text('$pulseSira. $ad',
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF1E293B))),
+                              Text(
+                                isPosOrYemek
+                                    ? 'Program: ${_formatTL(effectiveMyDom)}'
+                                    : 'MyDom: ${_formatTL(effectiveMyDom)}',
+                                style: const TextStyle(
+                                    fontSize: 9, color: Color(0xFF64748B)),
+                              ),
+                            ])),
                         SizedBox(
-                          width: wFark,
-                          child: Text(
-                            pulseCtrl.text.isEmpty && effectiveMyDom == 0
-                                ? '—'
-                                : eslesme
-                                    ? '✓'
-                                    : '${fark >= 0 ? '+' : ''}${_formatTL(fark).replaceAll(' ₺', '')}',
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                                color: (pulseCtrl.text.isEmpty &&
-                                        effectiveMyDom == 0)
-                                    ? Colors.grey[400]
-                                    : eslesme
-                                        ? Colors.green[700]
-                                        : fark > 0
-                                            ? Colors.green[700]
-                                            : Colors.red[700]),
-                          ),
-                        ),
-                        const SizedBox(width: 3),
-                        SizedBox(
-                          width: wSonuc,
+                          width: 90,
                           child: Container(
-                            height: 30,
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.symmetric(horizontal: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 7),
                             decoration: BoxDecoration(
-                              color: eslesme
-                                  ? Colors.green[100]
-                                  : Colors.orange[50],
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                  color: eslesme
-                                      ? Colors.green[300]!
-                                      : Colors.orange[300]!),
-                              borderRadius: BorderRadius.circular(5),
+                                  color: const Color(0xFF86EFAC), width: 1.5),
                             ),
                             child: Text(
-                              effectiveMyDom > 0
-                                  ? _formatTL(effectiveMyDom)
-                                      .replaceAll(' ₺', '')
-                                  : '—',
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: eslesme
-                                      ? Colors.green[800]
-                                      : Colors.orange[800]),
+                              _formatTL(pulseVal).replaceAll(' ₺', ''),
                               textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF15803D)),
                             ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text('✓',
+                            style: TextStyle(
+                                fontSize: 14,
+                                color: Color(0xFF16A34A),
+                                fontWeight: FontWeight.w700)),
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: () =>
+                              setState(() => _acikSatirlar.add(pulseKey)),
+                          child: Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(6),
+                              border:
+                                  Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: const Icon(Icons.edit,
+                                size: 13, color: Color(0xFF64748B)),
                           ),
                         ),
                       ]),
-                    );
-                  }),
-                ]);
+                    ),
+                  );
+                }
+
+                // Fark olanlar önce, sonra eşleşenler, en sonda girilmemişler
+                final farkVar = gorunenler.where((k) {
+                  final pulseKey = k['pulseKey'] as String;
+                  final tip = k['tip'] as String;
+                  final myDomVal =
+                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
+                  final isPosOrYemek = tip == 'pos' ||
+                      tip == 'yemek' ||
+                      (tip == 'pulseKalemi' && myDomVal > 0);
+                  final pulseCtrl =
+                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
+                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
+                  final effectiveMyDom = isPosOrYemek
+                      ? myDomVal
+                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
+                          ? _parseDouble(myDomCtrl.text)
+                          : myDomVal);
+                  final fark = effectiveMyDom - _parseDouble(pulseCtrl.text);
+                  final eslesme = fark.abs() < 0.01 &&
+                      (pulseCtrl.text.isNotEmpty || effectiveMyDom == 0);
+                  final bos = pulseCtrl.text.isEmpty && effectiveMyDom == 0;
+                  return !eslesme && !bos;
+                }).toList();
+
+                final eslesenler = gorunenler.where((k) {
+                  final pulseKey = k['pulseKey'] as String;
+                  final tip = k['tip'] as String;
+                  final myDomVal =
+                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
+                  final isPosOrYemek = tip == 'pos' ||
+                      tip == 'yemek' ||
+                      (tip == 'pulseKalemi' && myDomVal > 0);
+                  final pulseCtrl =
+                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
+                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
+                  final effectiveMyDom = isPosOrYemek
+                      ? myDomVal
+                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
+                          ? _parseDouble(myDomCtrl.text)
+                          : myDomVal);
+                  final fark = effectiveMyDom - _parseDouble(pulseCtrl.text);
+                  return fark.abs() < 0.01 &&
+                      (pulseCtrl.text.isNotEmpty || effectiveMyDom == 0);
+                }).toList();
+
+                final girilmemis = gorunenler.where((k) {
+                  final pulseKey = k['pulseKey'] as String;
+                  final tip = k['tip'] as String;
+                  final myDomVal =
+                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
+                  final isPosOrYemek = tip == 'pos' ||
+                      tip == 'yemek' ||
+                      (tip == 'pulseKalemi' && myDomVal > 0);
+                  final pulseCtrl =
+                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
+                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
+                  final effectiveMyDom = isPosOrYemek
+                      ? myDomVal
+                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
+                          ? _parseDouble(myDomCtrl.text)
+                          : myDomVal);
+                  return pulseCtrl.text.isEmpty && effectiveMyDom == 0;
+                }).toList();
+
+                return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Özet bar
+                      Row(children: [
+                        if (farkVar.isNotEmpty)
+                          Expanded(
+                              child: Container(
+                            margin: const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                                color: const Color(0xFFFEF2F2),
+                                borderRadius: BorderRadius.circular(8),
+                                border:
+                                    Border.all(color: const Color(0xFFFCA5A5))),
+                            child: Column(children: [
+                              Text('${farkVar.length}',
+                                  style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFFDC2626))),
+                              const Text('Fark var',
+                                  style: TextStyle(
+                                      fontSize: 9, color: Color(0xFFDC2626))),
+                            ]),
+                          )),
+                        if (eslesenler.isNotEmpty)
+                          Expanded(
+                              child: Container(
+                            margin: EdgeInsets.only(
+                                right: girilmemis.isNotEmpty ? 4 : 0),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                                color: const Color(0xFFF0FDF4),
+                                borderRadius: BorderRadius.circular(8),
+                                border:
+                                    Border.all(color: const Color(0xFF86EFAC))),
+                            child: Column(children: [
+                              Text('${eslesenler.length}',
+                                  style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF16A34A))),
+                              const Text('Eşleşiyor',
+                                  style: TextStyle(
+                                      fontSize: 9, color: Color(0xFF15803D))),
+                            ]),
+                          )),
+                        if (girilmemis.isNotEmpty)
+                          Expanded(
+                              child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(8),
+                                border:
+                                    Border.all(color: const Color(0xFFE2E8F0))),
+                            child: Column(children: [
+                              Text('${girilmemis.length}',
+                                  style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF64748B))),
+                              const Text('Girilmemiş',
+                                  style: TextStyle(
+                                      fontSize: 9, color: Color(0xFF64748B))),
+                            ]),
+                          )),
+                      ]),
+                      const SizedBox(height: 10),
+
+                      // Fark var
+                      if (farkVar.isNotEmpty) ...[
+                        Row(children: [
+                          const Text('⚠ Fark var',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFDC2626))),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Container(
+                                  height: 0.5, color: const Color(0xFFE2E8F0))),
+                        ]),
+                        const SizedBox(height: 5),
+                        ...farkVar.map((k) => _satir(k)),
+                        const SizedBox(height: 6),
+                      ],
+
+                      // Eşleşiyor
+                      if (eslesenler.isNotEmpty) ...[
+                        Row(children: [
+                          const Text('✓ Eşleşiyor',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF16A34A))),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Container(
+                                  height: 0.5, color: const Color(0xFFE2E8F0))),
+                        ]),
+                        const SizedBox(height: 5),
+                        ...eslesenler.map((k) => _satir(k)),
+                        const SizedBox(height: 6),
+                      ],
+
+                      // Girilmemiş
+                      if (girilmemis.isNotEmpty) ...[
+                        Row(children: [
+                          const Text('— Girilmemiş',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF94A3B8))),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Container(
+                                  height: 0.5, color: const Color(0xFFE2E8F0))),
+                        ]),
+                        const SizedBox(height: 5),
+                        ...girilmemis.map((k) => _satir(k)),
+                      ],
+                    ]);
               }),
 
               // Pulse kontrol onay butonu
@@ -5102,18 +5655,25 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           ],
                         ),
                       )
-                    : ElevatedButton.icon(
-                        onPressed: _readOnly
-                            ? null
-                            : () =>
-                                setState(() => _pulseKontrolOnaylandi = true),
-                        icon: const Icon(Icons.check_circle_outline),
-                        label:
-                            const Text('Pulse\'u kontrol ettim, veriler doğru'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange[700],
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                    : Tooltip(
+                        message: farkliSayisi > 0
+                            ? '$farkliSayisi kalemde fark var, önce Pulse\'ta düzeltin'
+                            : '',
+                        child: ElevatedButton.icon(
+                          onPressed: (_readOnly || farkliSayisi > 0)
+                              ? null
+                              : () =>
+                                  setState(() => _pulseKontrolOnaylandi = true),
+                          icon: const Icon(Icons.check_circle_outline),
+                          label: const Text(
+                              'Pulse\'u kontrol ettim, veriler doğru'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: farkliSayisi > 0
+                                ? Colors.grey[400]
+                                : Colors.orange[700],
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
                         ),
                       ),
               ),
@@ -5234,14 +5794,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           digerEslestirme.add({'pulseAdi': key, 'sistemAdi': ad});
       }
 
-      // Fuzzy lookup — Gemini'nin döndürdüğü adı tanımlı Pulse adıyla eşleştir
+      // Fuzzy lookup — Gemini'nin ekrandan okuduğu ham adı tanımlı Pulse adıyla eşleştirir
+      // Gemini artık ham ekran adını döndürür (sistem adını değil)
       String? fuzzyBul(String geminiAd, List<Map<String, String>> liste) {
         final aranan = geminiAd.toUpperCase().trim();
         // 1. Tam eşleşme
         for (final e in liste) {
           if (e['pulseAdi'] == aranan) return e['sistemAdi'];
         }
-        // 2. Gemini adı tanımlı adı içeriyor mu (YEMEK SEPETI OI içinde YEMEK SEPETI var mı)
+        // 2. Gemini adı tanımlı adı içeriyor mu
         for (final e in liste) {
           final pulseAdi = e['pulseAdi']!;
           if (pulseAdi.isNotEmpty && aranan.contains(pulseAdi))
@@ -5253,7 +5814,44 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           if (pulseAdi.isNotEmpty && pulseAdi.contains(aranan))
             return e['sistemAdi'];
         }
-        // 4. İlk kelime eşleşmesi (YEMEK SEPETI → YEMEK)
+        // 4. Token bazlı eşleştirme — kısaltmalar ve yarım görünen metinler için
+        // Örnek: "DOMINOS ONL GR" ↔ "DOMINOS ONL ZR" → DOMINOS+ONL eşleşti, yeterli
+        final arananTokenlar =
+            aranan.split(' ').where((t) => t.length >= 2).toList();
+        if (arananTokenlar.isNotEmpty) {
+          String? enIyiEslesen;
+          int enIyiSkor = 0;
+          for (final e in liste) {
+            final pulseTokenlar =
+                e['pulseAdi']!.split(' ').where((t) => t.length >= 2).toList();
+            int skor = 0;
+            for (final at in arananTokenlar) {
+              for (final pt in pulseTokenlar) {
+                if (at == pt) {
+                  skor += 3;
+                  break;
+                }
+                if (pt.startsWith(at) || at.startsWith(pt)) {
+                  skor += 2;
+                  break;
+                }
+                if (at.length >= 3 &&
+                    pt.length >= 3 &&
+                    at.substring(0, 3) == pt.substring(0, 3)) {
+                  skor += 1;
+                  break;
+                }
+              }
+            }
+            final eslesmeOrani = skor / (arananTokenlar.length * 3);
+            if (eslesmeOrani >= 0.6 && skor > enIyiSkor) {
+              enIyiSkor = skor;
+              enIyiEslesen = e['sistemAdi'];
+            }
+          }
+          if (enIyiEslesen != null) return enIyiEslesen;
+        }
+        // 5. İlk kelime eşleşmesi (YEMEK SEPETI → YEMEK)
         final ilkKelime = aranan.split(' ').first;
         if (ilkKelime.length >= 4) {
           for (final e in liste) {
@@ -5263,49 +5861,74 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         return null;
       }
 
-      final onlineKanallar =
-          tumOdemeSnap.docs.where((d) => d.data()['tip'] == 'online').map((d) {
-        final ad = d.data()['ad'] as String? ?? '';
-        final pulseAdi = d.data()['pulseAdi'] as String? ?? '';
-        return pulseAdi.isNotEmpty ? '$ad (Pulse\'taki adı: $pulseAdi)' : ad;
-      }).join(', ');
+      // Pulse'taki adlarını topla — Gemini'ye sadece Pulse'ta görünen adları ver
+      final onlinePulseAdlar = tumOdemeSnap.docs
+          .where((d) => d.data()['tip'] == 'online')
+          .map((d) {
+            final ad = d.data()['ad'] as String? ?? '';
+            final pulseAdi = (d.data()['pulseAdi'] as String? ?? '').trim();
+            return pulseAdi.isNotEmpty ? pulseAdi : ad.toUpperCase();
+          })
+          .where((s) => s.isNotEmpty)
+          .join(', ');
 
-      // Yemek kartı kanallar
-      final yemekKanallar = tumOdemeSnap.docs
+      final yemekPulseAdlar = tumOdemeSnap.docs
           .where((d) => d.data()['tip'] == 'yemekKarti')
           .map((d) {
-        final ad = d.data()['ad'] as String? ?? '';
-        final pulseAdi = d.data()['pulseAdi'] as String? ?? '';
-        return pulseAdi.isNotEmpty ? '$ad (Pulse\'taki adı: $pulseAdi)' : ad;
-      }).join(', ');
+            final ad = d.data()['ad'] as String? ?? '';
+            final pulseAdi = (d.data()['pulseAdi'] as String? ?? '').trim();
+            return pulseAdi.isNotEmpty ? pulseAdi : ad.toUpperCase();
+          })
+          .where((s) => s.isNotEmpty)
+          .join(', ');
 
-      // Pulse kalemleri
-      final pulseKalemKanallar = tumOdemeSnap.docs
+      final pulseKalemAdlar = tumOdemeSnap.docs
           .where((d) => d.data()['tip'] == 'pulseKalemi')
           .map((d) {
-        final ad = d.data()['ad'] as String? ?? '';
-        final pulseAdi = d.data()['pulseAdi'] as String? ?? '';
-        return pulseAdi.isNotEmpty ? '$ad (Pulse\'taki adı: $pulseAdi)' : ad;
-      }).join(', ');
+            final ad = d.data()['ad'] as String? ?? '';
+            final pulseAdi = (d.data()['pulseAdi'] as String? ?? '').trim();
+            return pulseAdi.isNotEmpty ? pulseAdi : ad.toUpperCase();
+          })
+          .where((s) => s.isNotEmpty)
+          .join(', ');
 
       // Gemini'ye gönderilecek prompt
+      // ÖNEMLİ: Gemini ekranda GÖRDÜĞÜ ham adı döndürür, sistem adını değil.
+      // Eşleştirme fuzzyBul ile kodda yapılır — ad değişikliği okumayı etkilemez.
+
+      // Brüt Satış için Firestore'dan tanımlı Pulse adını al
+      final brutSatisPulseAdi = tumOdemeSnap.docs
+              .where((d) => d.data()['tip'] == 'pulseKalemi')
+              .map((d) => ({
+                    'ad': d.data()['ad'] as String? ?? '',
+                    'pulseAdi': (d.data()['pulseAdi'] as String? ?? '').trim(),
+                  }))
+              .where((m) =>
+                  (m['ad'] as String).toLowerCase().contains('brüt') ||
+                  (m['ad'] as String).toLowerCase().contains('brut'))
+              .map((m) => (m['pulseAdi'] as String).isNotEmpty
+                  ? m['pulseAdi']
+                  : 'Brüt Satış veya Genel Toplam')
+              .firstOrNull ??
+          'Brüt Satış veya Genel Toplam';
+
       final prompt = """Bu bir Pulse POS/kasa programı ekran görüntüsü.
 Aşağıdaki verileri JSON formatında çıkar:
-- brutsatis: Brüt Satış veya Genel Toplam rakamı (sadece sayı)
+- brutsatis: "$brutSatisPulseAdi" rakamı (sadece sayı)
 - bankapara: Banka Parası veya Kalan Nakit rakamı (sadece sayı)
 - kredikart: 01.KREDI KARTI veya Kredi Kartı toplamı (sadece sayı)
 - online: her online ödeme kanalı için {ad, tutar} listesi.
-  Kanallar: $onlineKanallar
-  Pulse'taki adını bul, sistem adını kullan.
+  Ekranda bu adlardan birini gördüğünde ekle: $onlinePulseAdlar
+  "ad" alanına ekranda GÖRDÜĞÜN adı AYNEN yaz, değiştirme.
 - yemek: her yemek kartı için {ad, tutar} listesi.
-  Kanallar: $yemekKanallar
-  Pulse'taki adını bul, sistem adını kullan.
+  Ekranda bu adlardan birini gördüğünde ekle: $yemekPulseAdlar
+  "ad" alanına ekranda GÖRDÜĞÜN adı AYNEN yaz, değiştirme.
 - diger: diğer pulse kalemleri için {ad, tutar} listesi.
-  Kanallar: $pulseKalemKanallar
-  Pulse'taki adını bul, sistem adını kullan.
+  Ekranda bu adlardan birini gördüğünde ekle: $pulseKalemAdlar
+  "ad" alanına ekranda GÖRDÜĞÜN adı AYNEN yaz, değiştirme.
 
 Sadece JSON dön, başka açıklama yazma. Örnek:
-{"brutsatis": 96614.57, "bankapara": 10860.00, "kredikart": 13697.00, "online": [{"ad": "Getir Online", "tutar": 1819.00}], "yemek": [{"ad": "Multinet", "tutar": 430.00}], "diger": []}
+{"brutsatis": 96614.57, "bankapara": 10860.00, "kredikart": 13697.00, "online": [{"ad": "DOMINOS ONL ZR", "tutar": 1819.00}], "yemek": [{"ad": "MULTINET", "tutar": 430.00}], "diger": []}
 
 Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
@@ -5585,25 +6208,99 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
           .where('aktif', isEqualTo: true)
           .get();
 
+      // digerEkranAdi → sistemAdi lookup tablosu
+      final List<Map<String, String>> myDomEslestirme = [];
+      for (final d in onlineSnap.docs) {
+        final ad = d.data()['ad'] as String? ?? '';
+        final digerAd =
+            (d.data()['digerEkranAdi'] as String? ?? '').toUpperCase().trim();
+        if (ad.isEmpty) continue;
+        final key = digerAd.isNotEmpty ? digerAd : ad.toUpperCase();
+        myDomEslestirme.add({'digerAdi': key, 'sistemAdi': ad});
+      }
+
+      // MyDominos fuzzy eşleştirme — Pulse fuzzyBul ile aynı mantık
+      String? myDomFuzzyBul(String geminiAd) {
+        final aranan = geminiAd.toUpperCase().trim();
+        for (final e in myDomEslestirme) {
+          if (e['digerAdi'] == aranan) return e['sistemAdi'];
+        }
+        for (final e in myDomEslestirme) {
+          final digerAdi = e['digerAdi']!;
+          if (digerAdi.isNotEmpty && aranan.contains(digerAdi))
+            return e['sistemAdi'];
+        }
+        for (final e in myDomEslestirme) {
+          final digerAdi = e['digerAdi']!;
+          if (digerAdi.isNotEmpty && digerAdi.contains(aranan))
+            return e['sistemAdi'];
+        }
+        // Token bazlı — kısaltmalar için
+        final arananTokenlar =
+            aranan.split(' ').where((t) => t.length >= 2).toList();
+        if (arananTokenlar.isNotEmpty) {
+          String? enIyi;
+          int enIyiSkor = 0;
+          for (final e in myDomEslestirme) {
+            final digerTokenlar =
+                e['digerAdi']!.split(' ').where((t) => t.length >= 2).toList();
+            int skor = 0;
+            for (final at in arananTokenlar) {
+              for (final dt in digerTokenlar) {
+                if (at == dt) {
+                  skor += 3;
+                  break;
+                }
+                if (dt.startsWith(at) || at.startsWith(dt)) {
+                  skor += 2;
+                  break;
+                }
+                if (at.length >= 3 &&
+                    dt.length >= 3 &&
+                    at.substring(0, 3) == dt.substring(0, 3)) {
+                  skor += 1;
+                  break;
+                }
+              }
+            }
+            final oran = skor / (arananTokenlar.length * 3);
+            if (oran >= 0.6 && skor > enIyiSkor) {
+              enIyiSkor = skor;
+              enIyi = e['sistemAdi'];
+            }
+          }
+          if (enIyi != null) return enIyi;
+        }
+        final ilkKelime = aranan.split(' ').first;
+        if (ilkKelime.length >= 4) {
+          for (final e in myDomEslestirme) {
+            if (e['digerAdi']!.startsWith(ilkKelime)) return e['sistemAdi'];
+          }
+        }
+        return null;
+      }
+
+      // Gemini'ye sadece My Dominos'ta görünen adları ver
       final kanallar = onlineSnap.docs
           .map((d) {
             final ad = d.data()['ad'] as String? ?? '';
-            final digerAd = d.data()['digerEkranAdi'] as String? ?? '';
-            return digerAd.isNotEmpty
-                ? '$ad (My Dominos\'taki adı: $digerAd)'
-                : ad;
+            final digerAd = (d.data()['digerEkranAdi'] as String? ?? '').trim();
+            return digerAd.isNotEmpty ? digerAd : ad.toUpperCase();
           })
           .where((s) => s.isNotEmpty)
           .join(', ');
 
+      // ÖNEMLİ: Gemini ekranda GÖRDÜĞÜ ham adı döndürür, sistem adını değil.
+      // Eşleştirme myDomFuzzyBul ile kodda yapılır — ad değişikliği okumayı etkilemez.
       final prompt = """Bu bir My Dominos sipariş dökümü ekran görüntüsü.
 Sadece "Online Kredi" veya "Banka Kartı" içeren satırların Ciro değerlerini al.
 Nakit, Metropol Kart, Pluxee gibi yemek kartı satırlarını alma.
 
-Kanallar ve My Dominos'taki adları: $kanallar
+Ekranda bu adlardan birini gördüğünde listeye ekle: $kanallar
+"ad" alanına ekranda GÖRDÜĞÜN adı AYNEN yaz, değiştirme.
 
 Aşağıdaki JSON formatında döndür:
-{"online": [{"ad": "sistem_adi", "tutar": 1234.56}]}
+{"online": [{"ad": "EKRANDAKI_AD", "tutar": 1234.56}]}
 
 Sadece JSON döndür, başka açıklama yazma.
 Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
@@ -5708,9 +6405,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       final Map<String, double> yeniOkunan = {};
       if (okunan['online'] != null) {
         for (final o in (okunan['online'] as List)) {
-          final ad = o['ad'] as String? ?? '';
+          final geminiAd = o['ad'] as String? ?? '';
           final tutar = (o['tutar'] as num? ?? 0).toDouble();
-          if (ad.isNotEmpty && tutar > 0) yeniOkunan[ad] = tutar;
+          if (geminiAd.isEmpty || tutar <= 0) continue;
+          // Gemini ham ekran adını döndürür — fuzzy ile sistem adına çevir
+          final sistemAd = myDomFuzzyBul(geminiAd) ?? geminiAd;
+          yeniOkunan[sistemAd] = (yeniOkunan[sistemAd] ?? 0) + tutar;
         }
       }
 
@@ -5883,6 +6583,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     for (var h in _nakitCikislar) h.dispose();
     for (var d in _nakitDovizler) {
       (d['ctrl'] as TextEditingController).dispose();
+      (d['aciklamaCtrl'] as TextEditingController?)?.dispose();
     }
     for (var c in _banknotCtrl.values) c.dispose();
     for (var c in _dovizBankayaYatiranCtrl.values) c.dispose();
@@ -7649,6 +8350,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       // Nakit Çıkış dövizler
       for (var d in _nakitDovizler) {
         (d['ctrl'] as TextEditingController).dispose();
+        (d['aciklamaCtrl'] as TextEditingController?)?.dispose();
       }
       _nakitDovizler.clear();
       final nakitDovizList =
@@ -7659,6 +8361,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           _nakitDovizler.add({
             'cins': d['cins'] ?? 'USD',
             'ctrl': TextEditingController(text: _sifirTemizle(miktar)),
+            'aciklamaCtrl':
+                TextEditingController(text: d['aciklama'] as String? ?? ''),
           });
         }
       }
@@ -7826,6 +8530,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       _nakitCikislar.add(HarcamaGirisi());
       for (var d in _nakitDovizler) {
         (d['ctrl'] as TextEditingController).dispose();
+        (d['aciklamaCtrl'] as TextEditingController?)?.dispose();
       }
       _nakitDovizler.clear();
       for (var d in _bankaDovizler) {
@@ -8642,6 +9347,10 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                 'miktar': _parseDouble(
                   (d['ctrl'] as TextEditingController).text,
                 ),
+                'aciklama': (d['aciklamaCtrl'] as TextEditingController?)
+                        ?.text
+                        .trim() ??
+                    '',
               },
             )
             .where((d) => (d['miktar'] as double) > 0)
@@ -9789,201 +10498,208 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
   Widget _yemekKartiSection() {
     if (_yemekKartiCinsleri.isEmpty) return const SizedBox.shrink();
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitle('Yemek Kartları', Icons.credit_card),
-            ..._yemekKartlari.asMap().entries.map((e) {
-              final idx = e.key;
-              final y = e.value;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: DropdownButtonFormField<String>(
-                        value: _yemekKartiCinsleri.isEmpty
-                            ? null
-                            : _yemekKartiCinsleri.contains(y.cins)
-                                ? y.cins
-                                : _yemekKartiCinsleri.first,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Kart',
-                          isDense: true,
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFF7C3AED), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle('Yemek Kartları', Icons.credit_card),
+              ..._yemekKartlari.asMap().entries.map((e) {
+                final idx = e.key;
+                final y = e.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<String>(
+                          value: _yemekKartiCinsleri.isEmpty
+                              ? null
+                              : _yemekKartiCinsleri.contains(y.cins)
+                                  ? y.cins
+                                  : _yemekKartiCinsleri.first,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Kart',
+                            isDense: true,
+                          ),
+                          items: _yemekKartiCinsleri
+                              .toSet()
+                              .map((c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(c,
+                                        style: const TextStyle(fontSize: 13),
+                                        overflow: TextOverflow.ellipsis),
+                                  ))
+                              .toList(),
+                          onChanged: _readOnly
+                              ? null
+                              : (v) {
+                                  if (v != null) {
+                                    setState(() {
+                                      _yemekKartlari[idx].cins = v;
+                                      _degisiklikVar = true;
+                                      if (_duzenlemeAcik)
+                                        _gercekDegisiklikVar = true;
+                                    });
+                                    _otomatikKaydetBaslat();
+                                  }
+                                },
                         ),
-                        items: _yemekKartiCinsleri
-                            .toSet()
-                            .map((c) => DropdownMenuItem(
-                                  value: c,
-                                  child: Text(c,
-                                      style: const TextStyle(fontSize: 13),
-                                      overflow: TextOverflow.ellipsis),
-                                ))
-                            .toList(),
-                        onChanged: _readOnly
-                            ? null
-                            : (v) {
-                                if (v != null) {
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: y.tutarCtrl,
+                          readOnly: _readOnly,
+                          autofocus: y.yeni,
+                          decoration: const InputDecoration(
+                            labelText: 'Tutar (₺)',
+                            suffixText: '₺',
+                            isDense: true,
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          inputFormatters: [BinAraciFormatter()],
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                      if (_yemekKartlari.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline,
+                              color: Colors.red),
+                          onPressed: _readOnly
+                              ? null
+                              : () {
                                   setState(() {
-                                    _yemekKartlari[idx].cins = v;
+                                    _yemekKartlari[idx].dispose();
+                                    _yemekKartlari.removeAt(idx);
                                     _degisiklikVar = true;
-                                    if (_duzenlemeAcik)
-                                      _gercekDegisiklikVar = true;
                                   });
                                   _otomatikKaydetBaslat();
-                                }
-                              },
+                                },
+                        ),
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _readOnly || _yemekKartiCinsleri.isEmpty
+                    ? null
+                    : () => setState(() {
+                          _yemekKartlari.add(YemekKartiGirisi(
+                            cins: _yemekKartiCinsleri.first,
+                            yeni: true,
+                          ));
+                        }),
+                icon: const Icon(Icons.add),
+                label: const Text('Satır Ekle'),
+              ),
+              const Divider(),
+              // Cins bazlı toplam + Pulse karşılaştırması
+              ...() {
+                final cinsler = _yemekKartiCinsleri
+                    .where((c) =>
+                        _yemekKartiCinsToplam(c) > 0 ||
+                        (_sistemYemekKartiCtrl[c]?.text.isNotEmpty == true))
+                    .toList();
+                return cinsler.map((cins) {
+                  final toplam = _yemekKartiCinsToplam(cins);
+                  final cinsRenk = _yemekKartiRenk(cins);
+                  return Column(
+                    children: [
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: cinsRenk.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              '$cins Toplam',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: cinsRenk,
+                              ),
+                            ),
+                            Text(
+                              _formatTL(toplam),
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: cinsRenk,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList();
+              }(),
+              const SizedBox(height: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7C3AED),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Toplam Yemek Kartı',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.white,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: y.tutarCtrl,
-                        readOnly: _readOnly,
-                        autofocus: y.yeni,
-                        decoration: const InputDecoration(
-                          labelText: 'Tutar (₺)',
-                          suffixText: '₺',
-                          isDense: true,
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.next,
-                        inputFormatters: [BinAraciFormatter()],
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
-                            }
-                          }
-                        },
+                    Text(
+                      _formatTL(_toplamYemekKarti),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.white,
                       ),
                     ),
-                    if (_yemekKartlari.length > 1)
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline,
-                            color: Colors.red),
-                        onPressed: _readOnly
-                            ? null
-                            : () {
-                                setState(() {
-                                  _yemekKartlari[idx].dispose();
-                                  _yemekKartlari.removeAt(idx);
-                                  _degisiklikVar = true;
-                                });
-                                _otomatikKaydetBaslat();
-                              },
-                      ),
                   ],
                 ),
-              );
-            }),
-            TextButton.icon(
-              onPressed: _readOnly || _yemekKartiCinsleri.isEmpty
-                  ? null
-                  : () => setState(() {
-                        _yemekKartlari.add(YemekKartiGirisi(
-                          cins: _yemekKartiCinsleri.first,
-                          yeni: true,
-                        ));
-                      }),
-              icon: const Icon(Icons.add),
-              label: const Text('Satır Ekle'),
-            ),
-            const Divider(),
-            // Cins bazlı toplam + Pulse karşılaştırması
-            ...() {
-              final cinsler = _yemekKartiCinsleri
-                  .where((c) =>
-                      _yemekKartiCinsToplam(c) > 0 ||
-                      (_sistemYemekKartiCtrl[c]?.text.isNotEmpty == true))
-                  .toList();
-              return cinsler.map((cins) {
-                final toplam = _yemekKartiCinsToplam(cins);
-                final cinsRenk = _yemekKartiRenk(cins);
-                return Column(
-                  children: [
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: cinsRenk.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '$cins Toplam',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: cinsRenk,
-                            ),
-                          ),
-                          Text(
-                            _formatTL(toplam),
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: cinsRenk,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                );
-              }).toList();
-            }(),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF6A1B9A).withOpacity(0.07),
-                borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Toplam Yemek Kartı',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: Color(0xFF4A148C),
-                    ),
-                  ),
-                  Text(
-                    _formatTL(_toplamYemekKarti),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Color(0xFF4A148C),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -9993,149 +10709,156 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   Widget _posSection() {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitleZorunlu('POS Cihazları', Icons.credit_card),
-            ..._posListesi.asMap().entries.map((e) {
-              int idx = e.key;
-              PosGirisi pos = e.value;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: pos.adCtrl,
-                        readOnly: _readOnly,
-                        decoration: const InputDecoration(
-                          labelText: 'Cihaz Adı',
-                        ),
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFF0369A1), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitleZorunlu('POS Cihazları', Icons.credit_card),
+              ..._posListesi.asMap().entries.map((e) {
+                int idx = e.key;
+                PosGirisi pos = e.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: pos.adCtrl,
+                          readOnly: _readOnly,
+                          decoration: const InputDecoration(
+                            labelText: 'Cihaz Adı',
+                          ),
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
                             }
-                          }
-                        },
+                          },
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 3,
-                      child: TextFormField(
-                        controller: pos.tutarCtrl,
-                        readOnly: _readOnly,
-                        autofocus: pos.yeni,
-                        decoration: const InputDecoration(
-                          labelText: 'Tutar (₺)',
-                          suffixText: '₺',
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.next,
-                        inputFormatters: [BinAraciFormatter()],
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 3,
+                        child: TextFormField(
+                          controller: pos.tutarCtrl,
+                          readOnly: _readOnly,
+                          autofocus: pos.yeni,
+                          decoration: const InputDecoration(
+                            labelText: 'Tutar (₺)',
+                            suffixText: '₺',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          inputFormatters: [BinAraciFormatter()],
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
                             }
-                          }
-                        },
-                      ),
-                    ),
-                    if (_posListesi.length > 1)
-                      IconButton(
-                        icon: const Icon(
-                          Icons.remove_circle_outline,
-                          color: Colors.red,
+                          },
                         ),
-                        onPressed: _readOnly
-                            ? null
-                            : () {
-                                setState(() {
-                                  _posListesi[idx].dispose();
-                                  _posListesi.removeAt(idx);
-                                  _degisiklikVar = true;
-                                });
-                                _otomatikKaydetBaslat();
-                              },
                       ),
-                  ],
-                ),
-              );
-            }),
-            TextButton.icon(
-              onPressed: _readOnly
-                  ? null
-                  : () => setState(
-                        () => _posListesi.add(
-                          PosGirisi(
-                            ad: 'POS ${_posListesi.length + 1}',
-                            yeni: true,
+                      if (_posListesi.length > 1)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.remove_circle_outline,
+                            color: Colors.red,
+                          ),
+                          onPressed: _readOnly
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _posListesi[idx].dispose();
+                                    _posListesi.removeAt(idx);
+                                    _degisiklikVar = true;
+                                  });
+                                  _otomatikKaydetBaslat();
+                                },
+                        ),
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _readOnly
+                    ? null
+                    : () => setState(
+                          () => _posListesi.add(
+                            PosGirisi(
+                              ad: 'POS ${_posListesi.length + 1}',
+                              yeni: true,
+                            ),
                           ),
                         ),
+                icon: const Icon(Icons.add),
+                label: const Text('POS Ekle'),
+              ),
+              const Divider(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0369A1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Toplam POS',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.white,
                       ),
-              icon: const Icon(Icons.add),
-              label: const Text('POS Ekle'),
-            ),
-            const Divider(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0288D1).withOpacity(0.07),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Toplam POS',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: Color(0xFF0288D1),
                     ),
-                  ),
-                  Text(
-                    _formatTL(_toplamPos),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Color(0xFF0288D1),
+                    Text(
+                      _formatTL(_toplamPos),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -10341,14 +11064,14 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           children: [
             Row(
               children: [
-                Icon(Icons.monitor, color: Colors.amber[700], size: 18),
+                Icon(Icons.monitor, color: const Color(0xFF0369A1), size: 18),
                 const SizedBox(width: 8),
                 Text(
                   'Banka Parası (Kasa Nakiti)',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: Colors.amber[800],
+                    color: const Color(0xFF0369A1),
                   ),
                 ),
                 const Spacer(),
@@ -10370,17 +11093,20 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: banka > 0 ? Colors.amber[50] : Colors.grey[50],
+                color: banka > 0 ? const Color(0xFFE0F2FE) : Colors.grey[50],
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: banka > 0 ? Colors.amber[400]! : Colors.grey[300]!,
+                  color:
+                      banka > 0 ? const Color(0xFF0369A1) : Colors.grey[300]!,
                   width: 1.5,
                 ),
               ),
               child: Row(
                 children: [
                   Icon(Icons.account_balance_wallet,
-                      color: banka > 0 ? Colors.amber[700] : Colors.grey[400],
+                      color: banka > 0
+                          ? const Color(0xFF0369A1)
+                          : Colors.grey[400],
                       size: 20),
                   const SizedBox(width: 10),
                   Expanded(
@@ -10391,7 +11117,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: banka > 0 ? Colors.amber[900] : Colors.grey[400],
+                        color: banka > 0
+                            ? const Color(0xFF0369A1)
+                            : Colors.grey[400],
                       ),
                     ),
                   ),
@@ -10415,141 +11143,148 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   Widget _harcamalarSection() {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitle('Harcamalar', Icons.receipt_long),
-            ..._harcamalar.asMap().entries.map((e) {
-              int idx = e.key;
-              HarcamaGirisi h = e.value;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFFF97316), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle('Harcamalar', Icons.receipt_long),
+              ..._harcamalar.asMap().entries.map((e) {
+                int idx = e.key;
+                HarcamaGirisi h = e.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: _GiderAdiAlani(
+                          ctrl: h.aciklamaCtrl,
+                          secenekler: _giderTurleriListesi,
+                          readOnly: _readOnly,
+                          labelText: 'Açıklama ${idx + 1}',
+                          onChanged: () {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: h.tutarCtrl,
+                          readOnly: _readOnly,
+                          decoration: const InputDecoration(
+                            labelText: 'Tutar (₺)',
+                            suffixText: '₺',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          inputFormatters: [BinAraciFormatter()],
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                      if (_harcamalar.length > 1)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.remove_circle_outline,
+                            color: Colors.red,
+                          ),
+                          onPressed: _readOnly
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _harcamalar[idx].dispose();
+                                    _harcamalar.removeAt(idx);
+                                    _degisiklikVar = true;
+                                  });
+                                  _otomatikKaydetBaslat();
+                                },
+                        ),
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _readOnly
+                    ? null
+                    : () => setState(
+                          () => _harcamalar.add(HarcamaGirisi(yeni: true)),
+                        ),
+                icon: const Icon(Icons.add),
+                label: const Text('Harcama Ekle'),
+              ),
+              const Divider(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF97316),
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(
-                      flex: 3,
-                      child: _GiderAdiAlani(
-                        ctrl: h.aciklamaCtrl,
-                        secenekler: _giderTurleriListesi,
-                        readOnly: _readOnly,
-                        labelText: 'Açıklama ${idx + 1}',
-                        onChanged: () {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
-                            }
-                          }
-                        },
+                    const Text(
+                      'Toplam Harcama',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.white,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: h.tutarCtrl,
-                        readOnly: _readOnly,
-                        decoration: const InputDecoration(
-                          labelText: 'Tutar (₺)',
-                          suffixText: '₺',
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.next,
-                        inputFormatters: [BinAraciFormatter()],
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
-                            }
-                          }
-                        },
+                    Text(
+                      _formatTL(_toplamHarcama),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.white,
                       ),
                     ),
-                    if (_harcamalar.length > 1)
-                      IconButton(
-                        icon: const Icon(
-                          Icons.remove_circle_outline,
-                          color: Colors.red,
-                        ),
-                        onPressed: _readOnly
-                            ? null
-                            : () {
-                                setState(() {
-                                  _harcamalar[idx].dispose();
-                                  _harcamalar.removeAt(idx);
-                                  _degisiklikVar = true;
-                                });
-                                _otomatikKaydetBaslat();
-                              },
-                      ),
                   ],
                 ),
-              );
-            }),
-            TextButton.icon(
-              onPressed: _readOnly
-                  ? null
-                  : () => setState(
-                        () => _harcamalar.add(HarcamaGirisi(yeni: true)),
-                      ),
-              icon: const Icon(Icons.add),
-              label: const Text('Harcama Ekle'),
-            ),
-            const Divider(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.red[50],
-                borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Toplam Harcama',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: Colors.red[700],
-                    ),
-                  ),
-                  Text(
-                    _formatTL(_toplamHarcama),
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.red[700],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -10559,389 +11294,136 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   Widget _nakitSayimSection() {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitleNakit('Nakit Sayım', Icons.account_balance_wallet),
-            Table(
-              columnWidths: const {
-                0: FlexColumnWidth(2),
-                1: FlexColumnWidth(2),
-                2: FlexColumnWidth(2),
-              },
-              children: [
-                TableRow(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0288D1).withOpacity(0.1),
-                  ),
-                  children: const [
-                    Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Text(
-                        'Banknot',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFF0284C7), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitleNakit('Nakit Sayım', Icons.account_balance_wallet),
+              Table(
+                columnWidths: const {
+                  0: FlexColumnWidth(2),
+                  1: FlexColumnWidth(2),
+                  2: FlexColumnWidth(2),
+                },
+                children: [
+                  TableRow(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0288D1).withOpacity(0.1),
                     ),
-                    Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Text(
-                        'Adet',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Text(
-                        'Tutar',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
-                ..._banknotlar.map((b) {
-                  int adet = _parseInt(_banknotCtrl[b]!.text);
-                  double tutar = b * adet.toDouble();
-                  bool isFlot = b <= _flotSiniri;
-                  return TableRow(
-                    decoration: isFlot
-                        ? BoxDecoration(color: Colors.green.withOpacity(0.05))
-                        : null,
-                    children: [
+                    children: const [
                       Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: Row(
-                          children: [
-                            Text(
-                              '$b ₺',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: isFlot ? Colors.green[700] : null,
-                              ),
-                            ),
-                            if (isFlot)
-                              Icon(
-                                Icons.fiber_manual_record,
-                                size: 8,
-                                color: Colors.green[700],
-                              ),
-                          ],
+                        padding: EdgeInsets.all(8),
+                        child: Text(
+                          'Banknot',
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: SizedBox(
-                          height: 36,
-                          child: TextFormField(
-                            controller: _banknotCtrl[b],
-                            readOnly: _readOnly,
-                            decoration: const InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              border: OutlineInputBorder(),
-                            ),
-                            keyboardType: TextInputType.number,
-                            textInputAction: TextInputAction.next,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            onChanged: (_) => setState(() {
-                              if (!_yukleniyor) {
-                                _degisiklikVar = true;
-                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                              }
-                            }),
-                          ),
+                        padding: EdgeInsets.all(8),
+                        child: Text(
+                          'Adet',
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            '${tutar.toStringAsFixed(0)} ₺',
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                          ),
+                        padding: EdgeInsets.all(8),
+                        child: Text(
+                          'Tutar',
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
-                  );
-                }),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Divider(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Toplam TL Nakit:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  _formatTL(_toplamNakitTL),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.fiber_manual_record,
-                      size: 10,
-                      color: Colors.green[700],
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Flot (≤$_flotSiniri ₺):',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.green[700],
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  _formatTL(_flotOtomatik),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green[700],
-                    fontSize: 15,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _manuelFlotCtrl,
-              readOnly: _readOnly,
-              decoration: InputDecoration(
-                labelText: 'Flot Ek Tutar (₺)',
-                suffixText: '₺',
-                hintText: 'Manuel ek flot tutarı',
-                prefixIcon: Icon(
-                  Icons.add_circle_outline,
-                  color: Colors.green[700],
-                ),
-                labelStyle: TextStyle(color: Colors.green[700]),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              textInputAction: TextInputAction.next,
-              inputFormatters: [BinAraciFormatter()],
-              onChanged: (_) => setState(() {
-                if (!_yukleniyor) {
-                  _degisiklikVar = true;
-                  if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                }
-              }),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Toplam Flot:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green[700],
-                  ),
-                ),
-                Text(
-                  _formatTL(_flotTutari),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green[700],
-                    fontSize: 16,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Divider(),
-            // ── Döviz ──────────────────────────────────────────────────────────
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Döviz',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                    color: Colors.red,
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: _readOnly ? null : () => _dovizEkle(),
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Döviz Ekle'),
-                ),
-              ],
-            ),
-            ..._dovizler.asMap().entries.map((e) {
-              int idx = e.key;
-              Map<String, dynamic> d = e.value;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    // Döviz cinsi
-                    SizedBox(
-                      width: 70,
-                      child: DropdownButtonFormField<String>(
-                        value: d['cins'] as String,
-                        isExpanded: true,
-                        menuMaxHeight: 200,
-                        decoration: const InputDecoration(
-                          contentPadding: EdgeInsets.symmetric(
+                  ..._banknotlar.map((b) {
+                    int adet = _parseInt(_banknotCtrl[b]!.text);
+                    double tutar = b * adet.toDouble();
+                    bool isFlot = b <= _flotSiniri;
+                    return TableRow(
+                      decoration: isFlot
+                          ? BoxDecoration(color: Colors.green.withOpacity(0.05))
+                          : null,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
                             horizontal: 8,
-                            vertical: 8,
+                            vertical: 4,
                           ),
-                          border: OutlineInputBorder(),
-                        ),
-                        items: ['USD', 'EUR', 'GBP', 'CHF', 'SAR']
-                            .map(
-                              (c) => DropdownMenuItem(
-                                value: c,
-                                child: Text(
-                                  c,
-                                  style: const TextStyle(fontSize: 13),
+                          child: Row(
+                            children: [
+                              Text(
+                                '$b ₺',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: isFlot ? Colors.green[700] : null,
                                 ),
                               ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setState(() => d['cins'] = v),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    // Miktar
-                    Expanded(
-                      child: TextFormField(
-                        controller: d['miktarCtrl'] as TextEditingController,
-                        readOnly: _readOnly,
-                        decoration: const InputDecoration(labelText: 'Miktar'),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
+                              if (isFlot)
+                                Icon(
+                                  Icons.fiber_manual_record,
+                                  size: 8,
+                                  color: Colors.green[700],
+                                ),
+                            ],
+                          ),
                         ),
-                        textInputAction: TextInputAction.next,
-                        inputFormatters: [BinAraciFormatter()],
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
-                            }
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    // Kur
-                    Expanded(
-                      child: TextFormField(
-                        controller: d['kurCtrl'] as TextEditingController,
-                        readOnly: _readOnly,
-                        decoration: const InputDecoration(labelText: 'Kur (₺)'),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.next,
-                        inputFormatters: [BinAraciFormatter()],
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
-                            }
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    // TL karşılığı
-                    SizedBox(
-                      width: 70,
-                      child: Text(
-                        _formatTL(
-                          _parseDouble(
-                                (d['miktarCtrl'] as TextEditingController).text,
-                              ) *
-                              _parseDouble(
-                                (d['kurCtrl'] as TextEditingController).text,
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          child: SizedBox(
+                            height: 36,
+                            child: TextFormField(
+                              controller: _banknotCtrl[b],
+                              readOnly: _readOnly,
+                              decoration: const InputDecoration(
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                border: OutlineInputBorder(),
                               ),
+                              keyboardType: TextInputType.number,
+                              textInputAction: TextInputAction.next,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              onChanged: (_) => setState(() {
+                                if (!_yukleniyor) {
+                                  _degisiklikVar = true;
+                                  if (_duzenlemeAcik)
+                                    _gercekDegisiklikVar = true;
+                                }
+                              }),
+                            ),
+                          ),
                         ),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              '${tutar.toStringAsFixed(0)} ₺',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                          ),
                         ),
-                        textAlign: TextAlign.right,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.remove_circle_outline,
-                        color: Colors.red,
-                        size: 20,
-                      ),
-                      onPressed: _readOnly
-                          ? null
-                          : () {
-                              setState(() {
-                                (d['miktarCtrl'] as TextEditingController)
-                                    .dispose();
-                                (d['kurCtrl'] as TextEditingController)
-                                    .dispose();
-                                _dovizler.removeAt(idx);
-                                _degisiklikVar = true;
-                              });
-                              _otomatikKaydetBaslat();
-                            },
-                    ),
-                  ],
-                ),
-              );
-            }),
-            if (_dovizler.isNotEmpty) ...[
+                      ],
+                    );
+                  }),
+                ],
+              ),
+              const SizedBox(height: 8),
               const Divider(),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -10954,67 +11436,365 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                     _formatTL(_toplamNakitTL),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Döviz TL Karşılığı (bilgi):',
-                    style: TextStyle(
-                      color: Colors.orange[700],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  Text(
-                    _formatTL(_toplamDovizTL),
-                    style: TextStyle(
-                      color: Colors.orange[700],
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Genel Toplam:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    _formatTL(_toplamNakitTL + _toplamDovizTL),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
                       fontSize: 15,
                     ),
                   ),
                 ],
               ),
-            ] else ...[
+              const SizedBox(height: 4),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Toplam Nakit:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.fiber_manual_record,
+                        size: 10,
+                        color: Colors.green[700],
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Flot (≤$_flotSiniri ₺):',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                    ],
                   ),
                   Text(
-                    _formatTL(_toplamNakitTL),
-                    style: const TextStyle(
+                    _formatTL(_flotOtomatik),
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
+                      color: Colors.green[700],
+                      fontSize: 15,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _manuelFlotCtrl,
+                readOnly: _readOnly,
+                decoration: InputDecoration(
+                  labelText: 'Flot Ek Tutar (₺)',
+                  suffixText: '₺',
+                  hintText: 'Manuel ek flot tutarı',
+                  prefixIcon: Icon(
+                    Icons.add_circle_outline,
+                    color: Colors.green[700],
+                  ),
+                  labelStyle: TextStyle(color: Colors.green[700]),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                textInputAction: TextInputAction.next,
+                inputFormatters: [BinAraciFormatter()],
+                onChanged: (_) => setState(() {
+                  if (!_yukleniyor) {
+                    _degisiklikVar = true;
+                    if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                  }
+                }),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Toplam Flot:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green[700],
+                    ),
+                  ),
+                  Text(
+                    _formatTL(_flotTutari),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green[700],
                       fontSize: 16,
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+              const Divider(),
+              // ── Döviz ──────────────────────────────────────────────────────────
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF5F3FF),
+                  border: Border(
+                      left: BorderSide(color: Color(0xFF7C3AED), width: 4)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Döviz',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Color(0xFF5B21B6),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _readOnly ? null : () => _dovizEkle(),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Döviz Ekle'),
+                    ),
+                  ],
+                ),
+              ),
+              ..._dovizler.asMap().entries.map((e) {
+                int idx = e.key;
+                Map<String, dynamic> d = e.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      // Döviz cinsi
+                      SizedBox(
+                        width: 70,
+                        child: DropdownButtonFormField<String>(
+                          value: d['cins'] as String,
+                          isExpanded: true,
+                          menuMaxHeight: 200,
+                          decoration: const InputDecoration(
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 8,
+                            ),
+                            border: OutlineInputBorder(),
+                          ),
+                          items: ['USD', 'EUR', 'GBP', 'CHF', 'SAR']
+                              .map(
+                                (c) => DropdownMenuItem(
+                                  value: c,
+                                  child: Text(
+                                    c,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) => setState(() => d['cins'] = v),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Miktar
+                      Expanded(
+                        child: TextFormField(
+                          controller: d['miktarCtrl'] as TextEditingController,
+                          readOnly: _readOnly,
+                          decoration:
+                              const InputDecoration(labelText: 'Miktar'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          inputFormatters: [BinAraciFormatter()],
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Kur
+                      Expanded(
+                        child: TextFormField(
+                          controller: d['kurCtrl'] as TextEditingController,
+                          readOnly: _readOnly,
+                          decoration:
+                              const InputDecoration(labelText: 'Kur (₺)'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          inputFormatters: [BinAraciFormatter()],
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // TL karşılığı
+                      SizedBox(
+                        width: 70,
+                        child: Text(
+                          _formatTL(
+                            _parseDouble(
+                                  (d['miktarCtrl'] as TextEditingController)
+                                      .text,
+                                ) *
+                                _parseDouble(
+                                  (d['kurCtrl'] as TextEditingController).text,
+                                ),
+                          ),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.remove_circle_outline,
+                          color: Colors.red,
+                          size: 20,
+                        ),
+                        onPressed: _readOnly
+                            ? null
+                            : () {
+                                setState(() {
+                                  (d['miktarCtrl'] as TextEditingController)
+                                      .dispose();
+                                  (d['kurCtrl'] as TextEditingController)
+                                      .dispose();
+                                  _dovizler.removeAt(idx);
+                                  _degisiklikVar = true;
+                                });
+                                _otomatikKaydetBaslat();
+                              },
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              if (_dovizler.isNotEmpty) ...[
+                const Divider(),
+                // TL Nakit
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0284C7),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Toplam TL Nakit',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                        Text(_formatTL(_toplamNakitTL),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
+                      ]),
+                ),
+                const SizedBox(height: 4),
+                // Döviz TL Karşılığı
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF7C3AED),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Döviz TL Karşılığı',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                        Text(_formatTL(_toplamDovizTL),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
+                      ]),
+                ),
+                const SizedBox(height: 4),
+                // Genel Toplam
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Genel Toplam',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                        Text(_formatTL(_toplamNakitTL + _toplamDovizTL),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16)),
+                      ]),
+                ),
+              ] else ...[
+                const Divider(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0284C7),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Toplam Nakit',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                        Text(_formatTL(_toplamNakitTL),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
+                      ]),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -11201,6 +11981,15 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
   // ── Kasa Özeti ──────────────────────────────────────────────────────────────
 
   Widget _kasaOzetiSection() {
+    final devredenFlot = _parseDouble(_devredenFlotCtrl.text);
+    final kasaFarki = _kasaFarki;
+    // Günlük Kasa Kalanı sadece TL (döviz dahil değil)
+    final gunlukKasaKalaniSadeceTL = _gunlukKasaKalaniTL;
+    // Toplam Kasa Kalanı = TL + dövizler
+    final toplamKasaKalani = _gunlukKasaKalani;
+    final herhangiDovizVar =
+        _dovizTurleri.any((t) => _buGunDovizMiktari(t) > 0);
+
     return Card(
       color: const Color(0xFFF0F4F8),
       child: Padding(
@@ -11209,102 +11998,237 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _sectionTitle('Kasa Özeti', Icons.summarize),
-            _bilgiSatiri('Toplam TL Nakit', _formatTL(_toplamNakitTL)),
-            if (_toplamDovizTL > 0)
-              _bilgiSatiri('Döviz TL Karşılığı', _formatTL(_toplamDovizTL)),
-            _bilgiSatiri('Harcamalar', _formatTL(_toplamHarcama)),
-            if (_toplamNakitCikis > 0)
-              _bilgiSatiri('Nakit Çıkış', _formatTL(_toplamNakitCikis)),
-            ..._nakitDovizler
-                .where(
-              (d) =>
-                  _parseDouble((d['ctrl'] as TextEditingController).text) > 0,
-            )
-                .map((d) {
-              final cins = d['cins'] as String;
-              final sembol = cins == 'USD'
-                  ? r'$'
-                  : cins == 'EUR'
-                      ? '€'
-                      : '£';
-              final miktar = _parseDouble(
-                (d['ctrl'] as TextEditingController).text,
-              );
-              return _bilgiSatiri(
-                'Nakit Çıkış ($cins)',
-                '$sembol ${miktar.toStringAsFixed(2)}',
-              );
-            }),
-            _bilgiSatiri('Toplam Flot', _formatTL(_flotTutari)),
-            const Divider(),
-            _farkSatiri(
-              'Günlük Kasa Kalanı',
-              _gunlukKasaKalani,
-              buyukFont: true,
-            ),
-            if (_toplamDovizTL > 0) ...[
-              const SizedBox(height: 6),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        const SizedBox(width: 4),
-                        Text(
-                          '  ↳ TL Kısmı:',
+
+            // ── TL Kartı ──
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE3F2FD),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF90CAF9)),
+              ),
+              child: Column(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 6),
+                    child: Row(children: [
+                      Text('TL',
                           style: TextStyle(
-                            color: Colors.green[700],
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      _formatTL(_gunlukKasaKalaniTL),
-                      style: TextStyle(
-                        color: Colors.green[700],
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                              color: Color(0xFF1565C0),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13)),
+                    ]),
+                  ),
+                  // Banka Parası
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Banka Parası',
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF1976D2))),
+                        Text(_formatTL(_bankaParasi),
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF1565C0))),
+                      ]),
+                  // Devreden Flot
+                  if (devredenFlot > 0) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Devreden Flot',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_formatTL(devredenFlot),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                  ],
+                  // Harcamalar
+                  if (_toplamHarcama > 0) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Harcamalar',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_formatTL(_toplamHarcama),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                  ],
+                  // Günlük Flot
+                  if (_flotTutari > 0) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Günlük Flot',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_formatTL(_flotTutari),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                  ],
+                  // Toplam Nakit
+                  const SizedBox(height: 2),
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Toplam Nakit',
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF1976D2))),
+                        Text(_formatTL(_toplamNakitTL),
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF1565C0))),
+                      ]),
+                  // Kasa Farkı — şerit içinde belirgin
+                  if (kasaFarki.abs() >= 0.01) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: kasaFarki >= 0
+                            ? Colors.green[600]
+                            : Colors.red[600],
+                        borderRadius: BorderRadius.circular(6),
                       ),
+                      child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Kasa Farkı',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12)),
+                            Text(
+                              _formatTL(kasaFarki),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13),
+                            ),
+                          ]),
                     ),
                   ],
-                ),
+                  const Divider(height: 12, color: Color(0xFF90CAF9)),
+                  // Günlük Kasa Kalanı — sadece TL
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Günlük Kasa Kalanı',
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF1976D2))),
+                        Text(
+                          _formatTL(gunlukKasaKalaniSadeceTL),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: gunlukKasaKalaniSadeceTL >= 0
+                                ? const Color(0xFF1565C0)
+                                : Colors.red[700],
+                          ),
+                        ),
+                      ]),
+                ],
               ),
-              ..._dovizTurleri.where((t) => _buGunDovizMiktari(t) > 0).map((t) {
-                String sembol = t == 'USD'
-                    ? r'$'
-                    : t == 'EUR'
-                        ? '€'
-                        : '£';
-                final cinsRenk = dovizRenk(t);
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '  ↳ $t Kısmı:',
-                        style: TextStyle(
-                          color: cinsRenk,
-                          fontSize: 13,
-                        ),
-                      ),
-                      Text(
-                        '$sembol ${_buGunDovizMiktari(t).toStringAsFixed(2)} '
-                        '(${_formatTL(_buGunDovizMiktari(t) * _dovizKur(t))})',
-                        style: TextStyle(
-                          color: cinsRenk,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
+            ),
+
+            // ── Döviz Kartları ──
+            ..._dovizTurleri.where((t) => _buGunDovizMiktari(t) > 0).map((t) {
+              final sembol = t == 'USD'
+                  ? r'$'
+                  : t == 'EUR'
+                      ? '€'
+                      : '£';
+              final bgRenk = dovizBgRenk(t);
+              final yaziRenk = dovizRenk(t);
+              final borderRenk = t == 'USD'
+                  ? const Color(0xFFFFCC80)
+                  : t == 'EUR'
+                      ? const Color(0xFFCE93D8)
+                      : const Color(0xFFA5D6A7);
+              final miktar = _buGunDovizMiktari(t);
+              final kur = _dovizKur(t);
+              final tlKarsiligi = miktar * kur;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: bgRenk,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: borderRenk),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('$sembol $t',
+                              style: TextStyle(
+                                  color: yaziRenk,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                          Text(
+                            '$sembol ${miktar.toStringAsFixed(2)}',
+                            style: TextStyle(
+                                color: yaziRenk,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15),
+                          ),
+                        ]),
+                    if (kur > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('TL Karşılığı',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: yaziRenk.withOpacity(0.8))),
+                            Text(_formatTL(tlKarsiligi),
+                                style:
+                                    TextStyle(fontSize: 11, color: yaziRenk)),
+                          ]),
                     ],
-                  ),
-                );
-              }),
-            ],
+                  ],
+                ),
+              );
+            }),
+
+            // ── Günlük Toplam Kasa Kalanı — her zaman göster ──
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color:
+                    toplamKasaKalani >= 0 ? Colors.green[700] : Colors.red[700],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Günlük Toplam Kasa Kalanı',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13),
+                    ),
+                    Text(
+                      _formatTL(toplamKasaKalani),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15),
+                    ),
+                  ]),
+            ),
           ],
         ),
       ),
@@ -12227,147 +13151,153 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   Widget _anaKasaHarcamalarSection() {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitle('Ana Kasa Harcamalar', Icons.money_off),
-            ..._anaKasaHarcamalari.asMap().entries.map((e) {
-              int idx = e.key;
-              HarcamaGirisi h = e.value;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: _GiderAdiAlani(
-                        ctrl: h.aciklamaCtrl,
-                        secenekler: _giderTurleriListesi,
-                        readOnly: _readOnly,
-                        labelText: 'Açıklama ${idx + 1}',
-                        onChanged: () {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFFDC2626), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle('Ana Kasa Harcamalar', Icons.money_off),
+              ..._anaKasaHarcamalari.asMap().entries.map((e) {
+                int idx = e.key;
+                HarcamaGirisi h = e.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: _GiderAdiAlani(
+                          ctrl: h.aciklamaCtrl,
+                          secenekler: _giderTurleriListesi,
+                          readOnly: _readOnly,
+                          labelText: 'Açıklama ${idx + 1}',
+                          onChanged: () {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
                             }
-                          }
-                        },
+                          },
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: h.tutarCtrl,
-                        readOnly: _readOnly,
-                        decoration: const InputDecoration(
-                          labelText: 'Tutar (₺)',
-                          suffixText: '₺',
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.next,
-                        inputFormatters: [BinAraciFormatter()],
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: h.tutarCtrl,
+                          readOnly: _readOnly,
+                          decoration: const InputDecoration(
+                            labelText: 'Tutar (₺)',
+                            suffixText: '₺',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          inputFormatters: [BinAraciFormatter()],
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
                             }
-                          }
-                        },
-                      ),
-                    ),
-                    if (_anaKasaHarcamalari.length > 1)
-                      IconButton(
-                        icon: const Icon(
-                          Icons.remove_circle_outline,
-                          color: Colors.red,
+                          },
                         ),
-                        onPressed: _readOnly
-                            ? null
-                            : () {
-                                setState(() {
-                                  _anaKasaHarcamalari[idx].dispose();
-                                  _anaKasaHarcamalari.removeAt(idx);
-                                  _degisiklikVar = true;
-                                });
-                                _otomatikKaydetBaslat();
-                              },
                       ),
-                  ],
-                ),
-              );
-            }),
-            TextButton.icon(
-              onPressed: _readOnly
-                  ? null
-                  : () => setState(
-                        () =>
-                            _anaKasaHarcamalari.add(HarcamaGirisi(yeni: true)),
-                      ),
-              icon: const Icon(Icons.add),
-              label: const Text('Harcama Ekle'),
-            ),
-            if (_toplamAnaKasaHarcama > 0) ...[
-              const Divider(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Toplam Harcama',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Colors.orange[800],
-                      ),
-                    ),
-                    Text(
-                      _formatTL(_toplamAnaKasaHarcama),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.orange[800],
-                      ),
-                    ),
-                  ],
-                ),
+                      if (_anaKasaHarcamalari.length > 1)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.remove_circle_outline,
+                            color: Colors.red,
+                          ),
+                          onPressed: _readOnly
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _anaKasaHarcamalari[idx].dispose();
+                                    _anaKasaHarcamalari.removeAt(idx);
+                                    _degisiklikVar = true;
+                                  });
+                                  _otomatikKaydetBaslat();
+                                },
+                        ),
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _readOnly
+                    ? null
+                    : () => setState(
+                          () => _anaKasaHarcamalari
+                              .add(HarcamaGirisi(yeni: true)),
+                        ),
+                icon: const Icon(Icons.add),
+                label: const Text('Harcama Ekle'),
               ),
+              if (_toplamAnaKasaHarcama > 0) ...[
+                const Divider(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDC2626),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Toplam Harcama',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Text(
+                        _formatTL(_toplamAnaKasaHarcama),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -12377,213 +13307,87 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   Widget _nakitCikisSection() {
     return Card(
-      color: Colors.purple[50],
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitle('Nakit Çıkış', Icons.payments_outlined),
-            ..._nakitCikislar.asMap().entries.map((e) {
-              int idx = e.key;
-              HarcamaGirisi h = e.value;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: _GiderAdiAlani(
-                        ctrl: h.aciklamaCtrl,
-                        secenekler: _giderTurleriListesi,
-                        readOnly: _readOnly,
-                        labelText: 'Açıklama ${idx + 1}',
-                        onChanged: () {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
-                            }
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: h.tutarCtrl,
-                        readOnly: _readOnly,
-                        decoration: const InputDecoration(
-                          labelText: 'Tutar (₺)',
-                          suffixText: '₺',
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.next,
-                        inputFormatters: [BinAraciFormatter()],
-                        onChanged: (_) {
-                          if (mounted && !_yukleniyor) {
-                            setState(() {
-                              _degisiklikVar = true;
-                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                            });
-                            _otomatikKaydetBaslat();
-                            if (_kilitTutuyorum) {
-                              _kilitTimer?.cancel();
-                              _kilitTimer = Timer(
-                                const Duration(minutes: 20),
-                                _kilitBirak,
-                              );
-                            } else {
-                              _kilitAl();
-                            }
-                          }
-                        },
-                      ),
-                    ),
-                    if (_nakitCikislar.length > 1)
-                      IconButton(
-                        icon: const Icon(
-                          Icons.remove_circle_outline,
-                          color: Colors.red,
-                        ),
-                        onPressed: _readOnly
-                            ? null
-                            : () {
-                                setState(() {
-                                  _nakitCikislar[idx].dispose();
-                                  _nakitCikislar.removeAt(idx);
-                                  _degisiklikVar = true;
-                                });
-                                _otomatikKaydetBaslat();
-                              },
-                      ),
-                  ],
-                ),
-              );
-            }),
-            TextButton.icon(
-              onPressed: _readOnly
-                  ? null
-                  : () => setState(
-                        () => _nakitCikislar.add(HarcamaGirisi(yeni: true)),
-                      ),
-              icon: const Icon(Icons.add),
-              label: const Text('Nakit Çıkış Ekle'),
-            ),
-            // Döviz nakit çıkışlar
-            ..._nakitDovizler.asMap().entries.map((e) {
-              final idx = e.key;
-              final d = e.value;
-              final cins = d['cins'] as String;
-              final sembol = cins == 'USD'
-                  ? r'$'
-                  : cins == 'EUR'
-                      ? '€'
-                      : cins == 'GBP'
-                          ? '£'
-                          : cins;
-              final dovizAnaKasa = _dovizAnaKasa(cins);
-              final girilen = _parseDouble(
-                (d['ctrl'] as TextEditingController).text,
-              );
-              final fazla = dovizAnaKasa <= 0;
-              final limitAsti = girilen > dovizAnaKasa && dovizAnaKasa > 0;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 80,
-                          child: DropdownButtonFormField<String>(
-                            value: cins,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 8,
-                              ),
-                              border: OutlineInputBorder(),
-                            ),
-                            items: ['USD', 'EUR', 'GBP', 'CHF', 'SAR']
-                                .map(
-                                  (c) => DropdownMenuItem(
-                                    value: c,
-                                    child: Text(
-                                      c,
-                                      style: const TextStyle(fontSize: 13),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: _readOnly
-                                ? null
-                                : (v) => setState(() => d['cins'] = v),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextFormField(
-                            controller: d['ctrl'] as TextEditingController,
-                            enabled: !fazla && !_readOnly,
-                            decoration: InputDecoration(
-                              labelText: fazla
-                                  ? 'Kasada $cins yok'
-                                  : 'Miktar ($sembol) — Max: ${dovizAnaKasa.toStringAsFixed(2)}',
-                              suffixText: sembol,
-                              prefixIcon: Icon(
-                                Icons.payments_outlined,
-                                color: fazla
-                                    ? Colors.grey
-                                    : limitAsti
-                                        ? Colors.red[700]
-                                        : Colors.purple[700],
-                              ),
-                              labelStyle: TextStyle(
-                                color: fazla
-                                    ? Colors.grey
-                                    : limitAsti
-                                        ? Colors.red[700]
-                                        : Colors.purple[700],
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: limitAsti
-                                      ? Colors.red[700]!
-                                      : Colors.grey[300]!,
-                                ),
-                              ),
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: [BinAraciFormatter()],
-                            onChanged: (_) {
-                              if (!_yukleniyor)
-                                setState(() {
-                                  _degisiklikVar = true;
-                                  if (_duzenlemeAcik)
-                                    _gercekDegisiklikVar = true;
-                                });
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFFDC2626), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle('Nakit Çıkış', Icons.payments_outlined),
+              ..._nakitCikislar.asMap().entries.map((e) {
+                int idx = e.key;
+                HarcamaGirisi h = e.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: _GiderAdiAlani(
+                          ctrl: h.aciklamaCtrl,
+                          secenekler: _giderTurleriListesi,
+                          readOnly: _readOnly,
+                          labelText: 'Açıklama ${idx + 1}',
+                          onChanged: () {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
                               _otomatikKaydetBaslat();
-                            },
-                          ),
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
+                            }
+                          },
                         ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: h.tutarCtrl,
+                          readOnly: _readOnly,
+                          decoration: const InputDecoration(
+                            labelText: 'Tutar (₺)',
+                            suffixText: '₺',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          inputFormatters: [BinAraciFormatter()],
+                          onChanged: (_) {
+                            if (mounted && !_yukleniyor) {
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                              _otomatikKaydetBaslat();
+                              if (_kilitTutuyorum) {
+                                _kilitTimer?.cancel();
+                                _kilitTimer = Timer(
+                                  const Duration(minutes: 20),
+                                  _kilitBirak,
+                                );
+                              } else {
+                                _kilitAl();
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                      if (_nakitCikislar.length > 1)
                         IconButton(
                           icon: const Icon(
                             Icons.remove_circle_outline,
@@ -12593,133 +13397,291 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                               ? null
                               : () {
                                   setState(() {
-                                    (d['ctrl'] as TextEditingController)
-                                        .dispose();
-                                    _nakitDovizler.removeAt(idx);
+                                    _nakitCikislar[idx].dispose();
+                                    _nakitCikislar.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
                                   _otomatikKaydetBaslat();
                                 },
                         ),
-                      ],
-                    ),
-                    if (limitAsti)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 2),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.warning_amber,
-                              color: Colors.red[700],
-                              size: 14,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Kasada yalnizca $sembol ${dovizAnaKasa.toStringAsFixed(2)} var!',
-                              style: TextStyle(
-                                color: Colors.red[700],
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _readOnly
+                    ? null
+                    : () => setState(
+                          () => _nakitCikislar.add(HarcamaGirisi(yeni: true)),
                         ),
-                      ),
-                    if (fazla)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 2),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.info_outline,
-                              color: Colors.grey[600],
-                              size: 14,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Kasada $cins bulunmuyor',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            }),
-            TextButton.icon(
-              onPressed: _readOnly
-                  ? null
-                  : () => setState(
-                        () => _nakitDovizler.add({
-                          'cins': 'USD',
-                          'ctrl': TextEditingController(),
-                        }),
-                      ),
-              icon: Icon(
-                Icons.add,
-                color: _readOnly ? Colors.grey : Colors.purple[700],
+                icon: const Icon(Icons.add),
+                label: const Text('Nakit Çıkış Ekle'),
               ),
-              label: Text(
-                'Döviz Çıkış Ekle',
-                style: TextStyle(
-                  color: _readOnly ? Colors.grey : Colors.purple[700],
-                ),
-              ),
-            ),
-            if (_toplamNakitCikis > 0 ||
-                _nakitDovizler.any(
-                  (d) =>
-                      _parseDouble((d['ctrl'] as TextEditingController).text) >
-                      0,
-                )) ...[
-              const Divider(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.purple[100],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_toplamNakitCikis > 0)
+              // Döviz nakit çıkışlar
+              ..._nakitDovizler.asMap().entries.map((e) {
+                final idx = e.key;
+                final d = e.value;
+                final cins = d['cins'] as String;
+                final sembol = cins == 'USD'
+                    ? r'$'
+                    : cins == 'EUR'
+                        ? '€'
+                        : cins == 'GBP'
+                            ? '£'
+                            : cins;
+                final dovizAnaKasa = _dovizAnaKasa(cins);
+                final girilen = _parseDouble(
+                  (d['ctrl'] as TextEditingController).text,
+                );
+                final fazla = dovizAnaKasa <= 0;
+                final limitAsti = girilen > dovizAnaKasa && dovizAnaKasa > 0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Toplam Nakit Çıkış (TL)',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: Colors.purple[800],
+                          SizedBox(
+                            width: 80,
+                            child: DropdownButtonFormField<String>(
+                              value: cins,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                border: OutlineInputBorder(),
+                              ),
+                              items: ['USD', 'EUR', 'GBP', 'CHF', 'SAR']
+                                  .map(
+                                    (c) => DropdownMenuItem(
+                                      value: c,
+                                      child: Text(
+                                        c,
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: _readOnly
+                                  ? null
+                                  : (v) => setState(() => d['cins'] = v),
                             ),
                           ),
-                          Text(
-                            _formatTL(_toplamNakitCikis),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: Colors.purple[800],
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextFormField(
+                              controller: d['ctrl'] as TextEditingController,
+                              enabled: !fazla && !_readOnly,
+                              decoration: InputDecoration(
+                                labelText: fazla
+                                    ? 'Kasada $cins yok'
+                                    : 'Miktar ($sembol) — Max: ${dovizAnaKasa.toStringAsFixed(2)}',
+                                suffixText: sembol,
+                                prefixIcon: Icon(
+                                  Icons.payments_outlined,
+                                  color: fazla
+                                      ? Colors.grey
+                                      : limitAsti
+                                          ? Colors.red[700]
+                                          : Colors.purple[700],
+                                ),
+                                labelStyle: TextStyle(
+                                  color: fazla
+                                      ? Colors.grey
+                                      : limitAsti
+                                          ? Colors.red[700]
+                                          : Colors.purple[700],
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: limitAsti
+                                        ? Colors.red[700]!
+                                        : Colors.grey[300]!,
+                                  ),
+                                ),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              inputFormatters: [BinAraciFormatter()],
+                              onChanged: (_) {
+                                if (!_yukleniyor)
+                                  setState(() {
+                                    _degisiklikVar = true;
+                                    if (_duzenlemeAcik)
+                                      _gercekDegisiklikVar = true;
+                                  });
+                                _otomatikKaydetBaslat();
+                              },
                             ),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.remove_circle_outline,
+                              color: Colors.red,
+                            ),
+                            onPressed: _readOnly
+                                ? null
+                                : () {
+                                    setState(() {
+                                      (d['ctrl'] as TextEditingController)
+                                          .dispose();
+                                      _nakitDovizler.removeAt(idx);
+                                      _degisiklikVar = true;
+                                    });
+                                    _otomatikKaydetBaslat();
+                                  },
                           ),
                         ],
                       ),
-                    ..._nakitDovizler
-                        .where(
-                      (d) =>
-                          _parseDouble(
-                            (d['ctrl'] as TextEditingController).text,
-                          ) >
-                          0,
-                    )
-                        .map((d) {
+                      if (limitAsti)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.warning_amber,
+                                color: Colors.red[700],
+                                size: 14,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Kasada yalnizca $sembol ${dovizAnaKasa.toStringAsFixed(2)} var!',
+                                style: TextStyle(
+                                  color: Colors.red[700],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (fazla)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                color: Colors.grey[600],
+                                size: 14,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Kasada $cins bulunmuyor',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      // Açıklama alanı
+                      if (!fazla) ...[
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller:
+                              d['aciklamaCtrl'] as TextEditingController? ??
+                                  TextEditingController(),
+                          enabled: !_readOnly,
+                          decoration: InputDecoration(
+                            labelText: 'Açıklama (isteğe bağlı)',
+                            isDense: true,
+                            prefixIcon: Icon(Icons.notes,
+                                color: Colors.purple[300], size: 18),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
+                            border: const OutlineInputBorder(),
+                          ),
+                          inputFormatters: [IlkHarfBuyukFormatter()],
+                          onChanged: (_) {
+                            if (!_yukleniyor)
+                              setState(() {
+                                _degisiklikVar = true;
+                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                              });
+                            _otomatikKaydetBaslat();
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _readOnly
+                    ? null
+                    : () => setState(
+                          () => _nakitDovizler.add({
+                            'cins': 'USD',
+                            'ctrl': TextEditingController(),
+                            'aciklamaCtrl': TextEditingController(),
+                          }),
+                        ),
+                icon: Icon(
+                  Icons.add,
+                  color: _readOnly ? Colors.grey : Colors.purple[700],
+                ),
+                label: Text(
+                  'Döviz Çıkış Ekle',
+                  style: TextStyle(
+                    color: _readOnly ? Colors.grey : Colors.purple[700],
+                  ),
+                ),
+              ),
+              if (_toplamNakitCikis > 0 ||
+                  _nakitDovizler.any(
+                    (d) =>
+                        _parseDouble(
+                            (d['ctrl'] as TextEditingController).text) >
+                        0,
+                  )) ...[
+                const Divider(),
+                // TL toplam şeridi
+                if (_toplamNakitCikis > 0)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDC2626),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Toplam Nakit Çıkış (TL)',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                          Text(_formatTL(_toplamNakitCikis),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15)),
+                        ]),
+                  ),
+                // Döviz şeritleri — kendi renkleriyle
+                ..._nakitDovizler
+                    .where((d) =>
+                        _parseDouble(
+                            (d['ctrl'] as TextEditingController).text) >
+                        0)
+                    .fold<Map<String, double>>({}, (map, d) {
                       final cins = d['cins'] as String;
+                      map[cins] = (map[cins] ?? 0) +
+                          _parseDouble(
+                              (d['ctrl'] as TextEditingController).text);
+                      return map;
+                    })
+                    .entries
+                    .map((entry) {
+                      final cins = entry.key;
                       final sembol = cins == 'USD'
                           ? r'$'
                           : cins == 'EUR'
@@ -12727,36 +13689,41 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                               : cins == 'GBP'
                                   ? '£'
                                   : cins;
-                      final miktar = _parseDouble(
-                        (d['ctrl'] as TextEditingController).text,
-                      );
-                      return Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Nakit Çıkış ($cins)',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: Colors.purple[700],
-                            ),
-                          ),
-                          Text(
-                            '$sembol ${miktar.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: Colors.purple[700],
-                            ),
-                          ),
-                        ],
+                      final bgRenk = dovizBgRenk(cins);
+                      final yaziRenk = dovizRenk(cins);
+                      final borderRenk = cins == 'USD'
+                          ? const Color(0xFFFFCC80)
+                          : cins == 'EUR'
+                              ? const Color(0xFFCE93D8)
+                              : const Color(0xFFA5D6A7);
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: bgRenk,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: borderRenk),
+                        ),
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Nakit Çıkış ($cins)',
+                                  style: TextStyle(
+                                      color: yaziRenk,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13)),
+                              Text('$sembol ${entry.value.toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                      color: yaziRenk,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15)),
+                            ]),
                       );
                     }),
-                  ],
-                ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -12766,228 +13733,323 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   Widget _bankayaYatanSection() {
     return Card(
-      color: Colors.red[50],
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitle('Bankaya Yatan', Icons.account_balance),
-            // TL
-            TextFormField(
-              controller: _bankayaYatiranCtrl,
-              readOnly: _readOnly,
-              decoration: const InputDecoration(
-                labelText: 'TL (₺)',
-                suffixText: '₺',
-                prefixIcon: Icon(
-                  Icons.account_balance,
-                  color: Color(0xFF0288D1),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFF0369A1), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle('Bankaya Yatan', Icons.account_balance),
+              // TL
+              TextFormField(
+                controller: _bankayaYatiranCtrl,
+                readOnly: _readOnly,
+                decoration: const InputDecoration(
+                  labelText: 'TL (₺)',
+                  suffixText: '₺',
+                  prefixIcon: Icon(
+                    Icons.account_balance,
+                    color: Color(0xFF0288D1),
+                  ),
                 ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                textInputAction: TextInputAction.next,
+                inputFormatters: [BinAraciFormatter()],
+                onChanged: (_) => setState(() {
+                  if (!_yukleniyor) {
+                    _degisiklikVar = true;
+                    if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                  }
+                }),
               ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              textInputAction: TextInputAction.next,
-              inputFormatters: [BinAraciFormatter()],
-              onChanged: (_) => setState(() {
-                if (!_yukleniyor) {
-                  _degisiklikVar = true;
-                  if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                }
-              }),
-            ),
-            const SizedBox(height: 8),
-            // Döviz - dinamik
-            ..._bankaDovizler.asMap().entries.map((e) {
-              int idx = e.key;
-              Map<String, dynamic> d = e.value;
-              final cins = d['cins'] as String;
-              final sembol = cins == 'USD'
-                  ? '\$'
-                  : cins == 'EUR'
-                      ? '€'
-                      : '£';
-              final dovizAnaKasa = _dovizAnaKasa(cins);
-              final girilen = _parseDouble(
-                (d['ctrl'] as TextEditingController).text,
-              );
-              final fazla = dovizAnaKasa <= 0;
-              final limitAsti = girilen > dovizAnaKasa && dovizAnaKasa > 0;
+              const SizedBox(height: 8),
+              // Döviz - dinamik
+              ..._bankaDovizler.asMap().entries.map((e) {
+                int idx = e.key;
+                Map<String, dynamic> d = e.value;
+                final cins = d['cins'] as String;
+                final sembol = cins == 'USD'
+                    ? '\$'
+                    : cins == 'EUR'
+                        ? '€'
+                        : '£';
+                final dovizAnaKasa = _dovizAnaKasa(cins);
+                final girilen = _parseDouble(
+                  (d['ctrl'] as TextEditingController).text,
+                );
+                final fazla = dovizAnaKasa <= 0;
+                final limitAsti = girilen > dovizAnaKasa && dovizAnaKasa > 0;
 
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 80,
-                          child: DropdownButtonFormField<String>(
-                            value: cins,
-                            isExpanded: true,
-                            menuMaxHeight: 200,
-                            decoration: const InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 8,
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 80,
+                            child: DropdownButtonFormField<String>(
+                              value: cins,
+                              isExpanded: true,
+                              menuMaxHeight: 200,
+                              decoration: const InputDecoration(
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                border: OutlineInputBorder(),
                               ),
-                              border: OutlineInputBorder(),
-                            ),
-                            items: ['USD', 'EUR', 'GBP', 'CHF', 'SAR']
-                                .map(
-                                  (c) => DropdownMenuItem(
-                                    value: c,
-                                    child: Text(
-                                      c,
-                                      style: const TextStyle(fontSize: 13),
+                              items: ['USD', 'EUR', 'GBP', 'CHF', 'SAR']
+                                  .map(
+                                    (c) => DropdownMenuItem(
+                                      value: c,
+                                      child: Text(
+                                        c,
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
                                     ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) => setState(() => d['cins'] = v),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextFormField(
+                              controller: d['ctrl'] as TextEditingController,
+                              enabled: !fazla,
+                              decoration: InputDecoration(
+                                labelText: fazla
+                                    ? 'Kasada $cins yok'
+                                    : 'Miktar ($sembol) — Max: ${dovizAnaKasa.toStringAsFixed(2)}',
+                                suffixText: sembol,
+                                prefixIcon: Icon(
+                                  Icons.account_balance,
+                                  color: fazla
+                                      ? Colors.grey
+                                      : limitAsti
+                                          ? Colors.red[700]
+                                          : Colors.orange[700],
+                                ),
+                                labelStyle: TextStyle(
+                                  color: fazla
+                                      ? Colors.grey
+                                      : limitAsti
+                                          ? Colors.red[700]
+                                          : Colors.orange[700],
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: limitAsti
+                                        ? Colors.red[700]!
+                                        : Colors.grey[300]!,
                                   ),
-                                )
-                                .toList(),
-                            onChanged: (v) => setState(() => d['cins'] = v),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextFormField(
-                            controller: d['ctrl'] as TextEditingController,
-                            enabled: !fazla,
-                            decoration: InputDecoration(
-                              labelText: fazla
-                                  ? 'Kasada $cins yok'
-                                  : 'Miktar ($sembol) — Max: ${dovizAnaKasa.toStringAsFixed(2)}',
-                              suffixText: sembol,
-                              prefixIcon: Icon(
-                                Icons.account_balance,
-                                color: fazla
-                                    ? Colors.grey
-                                    : limitAsti
-                                        ? Colors.red[700]
-                                        : Colors.orange[700],
-                              ),
-                              labelStyle: TextStyle(
-                                color: fazla
-                                    ? Colors.grey
-                                    : limitAsti
-                                        ? Colors.red[700]
-                                        : Colors.orange[700],
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: limitAsti
-                                      ? Colors.red[700]!
-                                      : Colors.grey[300]!,
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: limitAsti
+                                        ? Colors.red[700]!
+                                        : Colors.orange[700]!,
+                                  ),
                                 ),
                               ),
-                              focusedBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: limitAsti
-                                      ? Colors.red[700]!
-                                      : Colors.orange[700]!,
-                                ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
                               ),
+                              textInputAction: TextInputAction.next,
+                              inputFormatters: [BinAraciFormatter()],
+                              onChanged: (_) => setState(() {
+                                if (!_yukleniyor) {
+                                  _degisiklikVar = true;
+                                  if (_duzenlemeAcik)
+                                    _gercekDegisiklikVar = true;
+                                }
+                              }),
                             ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            textInputAction: TextInputAction.next,
-                            inputFormatters: [BinAraciFormatter()],
-                            onChanged: (_) => setState(() {
-                              if (!_yukleniyor) {
-                                _degisiklikVar = true;
-                                if (_duzenlemeAcik) _gercekDegisiklikVar = true;
-                              }
-                            }),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            color: Colors.red,
-                          ),
-                          onPressed: _readOnly
-                              ? null
-                              : () {
-                                  setState(() {
-                                    (d['ctrl'] as TextEditingController)
-                                        .dispose();
-                                    _bankaDovizler.removeAt(idx);
-                                    _degisiklikVar = true;
-                                  });
-                                  _otomatikKaydetBaslat();
-                                },
-                        ),
-                      ],
-                    ),
-                    if (limitAsti)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 2),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.warning_amber,
-                              color: Colors.red[700],
-                              size: 14,
+                          IconButton(
+                            icon: const Icon(
+                              Icons.remove_circle_outline,
+                              color: Colors.red,
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Kasada yalnızca $sembol ${dovizAnaKasa.toStringAsFixed(2)} var!',
-                              style: TextStyle(
+                            onPressed: _readOnly
+                                ? null
+                                : () {
+                                    setState(() {
+                                      (d['ctrl'] as TextEditingController)
+                                          .dispose();
+                                      _bankaDovizler.removeAt(idx);
+                                      _degisiklikVar = true;
+                                    });
+                                    _otomatikKaydetBaslat();
+                                  },
+                          ),
+                        ],
+                      ),
+                      if (limitAsti)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.warning_amber,
                                 color: Colors.red[700],
-                                fontSize: 12,
+                                size: 14,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 4),
+                              Text(
+                                'Kasada yalnızca $sembol ${dovizAnaKasa.toStringAsFixed(2)} var!',
+                                style: TextStyle(
+                                  color: Colors.red[700],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    if (fazla)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 2),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.info_outline,
-                              color: Colors.grey[600],
-                              size: 14,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Kasada $cins bulunmuyor',
-                              style: TextStyle(
+                      if (fazla)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline,
                                 color: Colors.grey[600],
-                                fontSize: 12,
+                                size: 14,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 4),
+                              Text(
+                                'Kasada $cins bulunmuyor',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _readOnly
+                    ? null
+                    : () => setState(
+                          () => _bankaDovizler.add({
+                            'cins': 'USD',
+                            'ctrl': TextEditingController(),
+                          }),
+                        ),
+                icon: Icon(
+                  Icons.add,
+                  color: _readOnly ? Colors.grey : const Color(0xFF0369A1),
                 ),
-              );
-            }),
-            TextButton.icon(
-              onPressed: _readOnly
-                  ? null
-                  : () => setState(
-                        () => _bankaDovizler.add({
-                          'cins': 'USD',
-                          'ctrl': TextEditingController(),
-                        }),
-                      ),
-              icon: Icon(
-                Icons.add,
-                color: _readOnly ? Colors.grey : Colors.orange[700],
-              ),
-              label: Text(
-                'Döviz Ekle',
-                style: TextStyle(
-                  color: _readOnly ? Colors.grey : Colors.orange[700],
+                label: Text(
+                  'Döviz Ekle',
+                  style: TextStyle(
+                    color: _readOnly ? Colors.grey : const Color(0xFF0369A1),
+                  ),
                 ),
               ),
-            ),
-          ],
+              // ── Toplam Şeritleri ──
+              if (_parseDouble(_bankayaYatiranCtrl.text) > 0 ||
+                  _bankaDovizler.any((d) =>
+                      _parseDouble((d['ctrl'] as TextEditingController).text) >
+                      0)) ...[
+                const Divider(),
+                // TL şeridi
+                if (_parseDouble(_bankayaYatiranCtrl.text) > 0)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0369A1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Bankaya Yatan (TL)',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                          Text(
+                              _formatTL(_parseDouble(_bankayaYatiranCtrl.text)),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15)),
+                        ]),
+                  ),
+                // Döviz şeritleri — kendi renkleriyle
+                ..._bankaDovizler
+                    .where((d) =>
+                        _parseDouble(
+                            (d['ctrl'] as TextEditingController).text) >
+                        0)
+                    .fold<Map<String, double>>({}, (map, d) {
+                      final cins = d['cins'] as String;
+                      map[cins] = (map[cins] ?? 0) +
+                          _parseDouble(
+                              (d['ctrl'] as TextEditingController).text);
+                      return map;
+                    })
+                    .entries
+                    .map((entry) {
+                      final cins = entry.key;
+                      final sembol = cins == 'USD'
+                          ? r'$'
+                          : cins == 'EUR'
+                              ? '€'
+                              : cins == 'GBP'
+                                  ? '£'
+                                  : cins;
+                      final bgRenk = dovizBgRenk(cins);
+                      final yaziRenk = dovizRenk(cins);
+                      final borderRenk = cins == 'USD'
+                          ? const Color(0xFFFFCC80)
+                          : cins == 'EUR'
+                              ? const Color(0xFFCE93D8)
+                              : const Color(0xFFA5D6A7);
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: bgRenk,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: borderRenk),
+                        ),
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Bankaya Yatan ($cins)',
+                                  style: TextStyle(
+                                      color: yaziRenk,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13)),
+                              Text('$sembol ${entry.value.toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                      color: yaziRenk,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15)),
+                            ]),
+                      );
+                    }),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -13005,157 +14067,117 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           children: [
             _sectionTitle('Ana Kasa Özeti', Icons.account_balance),
 
-            // Devreden Ana Kasa
-            _altBaslik('Devreden Ana Kasa', Colors.blueGrey[700]!),
-            _ozetSatiri(
-              'TL',
-              _formatTL(_oncekiAnaKasaKalani),
-              Colors.blue[700]!,
-            ),
-            ..._dovizTurleri
-                .where((t) => (_devredenDovizMiktarlari[t] ?? 0) > 0)
-                .map((t) {
-              final sembol = t == 'USD'
-                  ? '\$'
-                  : t == 'EUR'
-                      ? '€'
-                      : '£';
-              return _ozetSatiri(
-                t,
-                '$sembol ${(_devredenDovizMiktarlari[t] ?? 0).toStringAsFixed(2)}',
-                dovizRenk(t),
-              );
-            }),
-            const Divider(),
-
-            // Bu Günün Kasa Kalanı
-            _altBaslik('Bu Günün Kasa Kalanı', Colors.blueGrey[700]!),
-            _ozetSatiri(
-              'TL',
-              _formatTL(_gunlukKasaKalaniTL),
-              Colors.blue[700]!,
-            ),
-            ..._dovizTurleri.where((t) => _buGunDovizMiktari(t) > 0).map((t) {
-              final sembol = t == 'USD'
-                  ? '\$'
-                  : t == 'EUR'
-                      ? '€'
-                      : '£';
-              return _ozetSatiri(
-                t,
-                '$sembol ${_buGunDovizMiktari(t).toStringAsFixed(2)}',
-                dovizRenk(t),
-              );
-            }),
-            const Divider(),
-
-            // Ana Kasa Harcamalar (varsa)
-            if (_toplamAnaKasaHarcama > 0) ...[
-              _altBaslik('Ana Kasa Harcamalar', Colors.blueGrey[700]!),
-              _ozetSatiri(
-                'Toplam',
-                _formatTL(_toplamAnaKasaHarcama),
-                Colors.orange[800]!,
-              ),
-              const Divider(),
-            ],
-
-            // Bankaya Yatırılan
-            _altBaslik('Bankaya Yatan', Colors.blueGrey[700]!),
-            _ozetSatiri(
-              'TL',
-              _formatTL(_parseDouble(_bankayaYatiranCtrl.text)),
-              Colors.blue[700]!,
-            ),
-            ..._bankaDovizler
-                .where(
-              (d) =>
-                  _parseDouble((d['ctrl'] as TextEditingController).text) > 0,
-            )
-                .map((d) {
-              final cins = d['cins'] as String;
-              final sembol = cins == 'USD'
-                  ? r'$'
-                  : cins == 'EUR'
-                      ? '€'
-                      : '£';
-              final miktar = _parseDouble(
-                (d['ctrl'] as TextEditingController).text,
-              );
-              return _ozetSatiri(
-                cins,
-                '$sembol ${miktar.toStringAsFixed(2)}',
-                dovizRenk(cins),
-              );
-            }),
-            // Nakit Çıkış (varsa)
-            if (_toplamNakitCikis > 0 ||
-                _nakitDovizler.any(
-                  (d) =>
-                      _parseDouble((d['ctrl'] as TextEditingController).text) >
-                      0,
-                )) ...[
-              _altBaslik('Nakit Çıkış', Colors.purple[700]!),
-              if (_toplamNakitCikis > 0)
-                _ozetSatiri(
-                  'TL',
-                  _formatTL(_toplamNakitCikis),
-                  Colors.purple[700]!,
-                ),
-              ..._nakitDovizler
-                  .where(
-                (d) =>
-                    _parseDouble(
-                      (d['ctrl'] as TextEditingController).text,
-                    ) >
-                    0,
-              )
-                  .map((d) {
-                final cins = d['cins'] as String;
-                final sembol = cins == 'USD'
-                    ? r'$'
-                    : cins == 'EUR'
-                        ? '€'
-                        : '£';
-                final miktar = _parseDouble(
-                  (d['ctrl'] as TextEditingController).text,
-                );
-                return _ozetSatiri(
-                  cins,
-                  '$sembol ${miktar.toStringAsFixed(2)}',
-                  Colors.purple[600]!,
-                );
-              }),
-            ],
-            const Divider(),
-
-            // Toplam Ana Kasa Kalanı
-            _altBaslik('Toplam Ana Kasa Kalanı', const Color(0xFF0288D1)),
+            // ── TL Kartı ──
             Container(
-              margin: const EdgeInsets.only(top: 4, bottom: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color:
-                    _anaKasaKalani >= 0 ? Colors.green[700] : Colors.red[700],
-                borderRadius: BorderRadius.circular(8),
+                color: const Color(0xFFE3F2FD),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF90CAF9)),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
                 children: [
-                  const Text(
-                    'TL',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  // Başlık
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 6),
+                    child: Row(children: [
+                      Text('TL',
+                          style: TextStyle(
+                              color: Color(0xFF1565C0),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13)),
+                    ]),
                   ),
-                  Text(
-                    _formatTL(_anaKasaKalani),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                  // Devreden Ana Kasa
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Devreden Ana Kasa',
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF1976D2))),
+                        Text(_formatTL(_oncekiAnaKasaKalani),
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF1565C0))),
+                      ]),
+                  const SizedBox(height: 2),
+                  // Günlük Kasa Kalanı
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Günlük Kasa Kalanı (TL)',
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF1976D2))),
+                        Text(_formatTL(_gunlukKasaKalaniTL),
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF1565C0))),
+                      ]),
+                  if (_parseDouble(_bankayaYatiranCtrl.text) > 0) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Bankaya Yatırılan',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(
+                              _formatTL(_parseDouble(_bankayaYatiranCtrl.text)),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                  ],
+                  if (_toplamAnaKasaHarcama > 0) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Ana Kasa Harcamalar',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_formatTL(_toplamAnaKasaHarcama),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                  ],
+                  if (_toplamNakitCikis > 0) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Nakit Çıkış',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_formatTL(_toplamNakitCikis),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                  ],
+                  const Divider(height: 10, color: Color(0xFF90CAF9)),
+                  // Ana Kasa Kalanı — yeşil/kırmızı bant
+                  Container(
+                    margin: const EdgeInsets.only(top: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _anaKasaKalani >= 0
+                          ? Colors.green[700]
+                          : Colors.red[700],
+                      borderRadius: BorderRadius.circular(6),
                     ),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Ana Kasa Kalanı',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                          Text(_formatTL(_anaKasaKalani),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15)),
+                        ]),
                   ),
                 ],
               ),
@@ -13190,6 +14212,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                   : t == 'EUR'
                       ? const Color(0xFFCE93D8)
                       : const Color(0xFFA5D6A7);
+              final nakitCikisT = _nakitDovizCikis(t);
               return Container(
                 margin: const EdgeInsets.only(top: 4),
                 padding: const EdgeInsets.symmetric(
@@ -13201,23 +14224,98 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: borderRenk),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Column(
                   children: [
-                    Text(
-                      t,
-                      style: TextStyle(
-                        color: yaziRenk,
-                        fontWeight: FontWeight.bold,
+                    // Başlık
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Text(
+                            '$sembol $t',
+                            style: TextStyle(
+                                color: yaziRenk,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13),
+                          ),
+                        ],
                       ),
                     ),
-                    Text(
-                      '$sembol ${kalan.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        color: kalan >= 0 ? yaziRenk : Colors.red[700],
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                    // Devreden
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Devreden Ana Kasa',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: yaziRenk.withOpacity(0.8))),
+                        Text(
+                            '$sembol ${(_devredenDovizMiktarlari[t] ?? 0).toStringAsFixed(2)}',
+                            style: TextStyle(fontSize: 12, color: yaziRenk)),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    // Günlük Kasa Kalanı
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Günlük Kasa Kalanı',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: yaziRenk.withOpacity(0.8))),
+                        Text(
+                            '$sembol ${_buGunDovizMiktari(t).toStringAsFixed(2)}',
+                            style: TextStyle(fontSize: 12, color: yaziRenk)),
+                      ],
+                    ),
+                    if (_dovizBankayaYatirilan(t) > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Bankaya Yatırılan',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: yaziRenk.withOpacity(0.8))),
+                          Text(
+                              '$sembol ${_dovizBankayaYatirilan(t).toStringAsFixed(2)}',
+                              style: TextStyle(fontSize: 12, color: yaziRenk)),
+                        ],
                       ),
+                    ],
+                    if (nakitCikisT > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Nakit Çıkış',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: yaziRenk.withOpacity(0.8))),
+                          Text('$sembol ${nakitCikisT.toStringAsFixed(2)}',
+                              style: TextStyle(fontSize: 12, color: yaziRenk)),
+                        ],
+                      ),
+                    ],
+                    const Divider(height: 10),
+                    // Ana Kasa Kalanı
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Ana Kasa Kalanı',
+                            style: TextStyle(
+                                color: yaziRenk,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                        Text(
+                          '$sembol ${kalan.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: kalan >= 0 ? yaziRenk : Colors.red[700],
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -13922,52 +15020,89 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                             horizontal: 16, vertical: 4),
                         child: _gunuKapatButonu(),
                       ),
-                      // Sekme başlıkları
-                      // Sekme navigasyonu — dropdown
-                      Container(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
+                      // Sekme navigasyonu — yuvarlak chip sekmeler
+                      Padding(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: const Color(0xFF0288D1), width: 1.5),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<int>(
-                            value: _tabController.index,
-                            isExpanded: true,
-                            icon: const Icon(Icons.keyboard_arrow_down,
-                                color: Color(0xFF0288D1)),
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF0288D1),
+                            horizontal: 8, vertical: 4),
+                        child: Row(
+                          children: [
+                            // Sol ok
+                            InkWell(
+                              onTap: () {
+                                if (_tabController.index > 0) {
+                                  setState(() => _tabController
+                                      .animateTo(_tabController.index - 1));
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(16),
+                              child: Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: const Color(0xFF0288D1), width: 1),
+                                  color: Colors.white,
+                                ),
+                                child: const Icon(Icons.chevron_left,
+                                    size: 18, color: Color(0xFF0288D1)),
+                              ),
                             ),
-                            onChanged: (i) {
-                              if (i != null) {
-                                setState(() => _tabController.animateTo(i));
-                              }
-                            },
-                            items: const [
-                              DropdownMenuItem(
-                                  value: 0, child: Text('1. POS & Kart')),
-                              DropdownMenuItem(
-                                  value: 1,
-                                  child: Text('2. Pulse / My Dominos')),
-                              DropdownMenuItem(
-                                  value: 2, child: Text('3. Şube Kasa')),
-                              DropdownMenuItem(
-                                  value: 3, child: Text('4. Ana Kasa')),
-                              DropdownMenuItem(
-                                  value: 4,
-                                  child: Text('5. Transfer / Diğer Alım')),
-                              DropdownMenuItem(
-                                  value: 5, child: Text('6. Özet & Kapat')),
-                            ],
-                          ),
+                            const SizedBox(width: 4),
+                            // Chip listesi
+                            Expanded(
+                              child: TabBar(
+                                controller: _tabController,
+                                isScrollable: true,
+                                tabAlignment: TabAlignment.start,
+                                indicator: BoxDecoration(
+                                  color: const Color(0xFF0288D1),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                indicatorSize: TabBarIndicatorSize.tab,
+                                dividerColor: Colors.transparent,
+                                labelColor: Colors.white,
+                                unselectedLabelColor: const Color(0xFF0288D1),
+                                labelStyle: const TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.bold),
+                                unselectedLabelStyle:
+                                    const TextStyle(fontSize: 12),
+                                splashBorderRadius: BorderRadius.circular(20),
+                                padding: EdgeInsets.zero,
+                                tabs: [
+                                  _chipTab('POS & Y. Kartı'),
+                                  _chipTab('Pulse / My Dom.'),
+                                  _chipTab('Günlük Kasa'),
+                                  _chipTab('Ana Kasa'),
+                                  _chipTab('Transfer'),
+                                  _chipTab('Özet & Kapat'),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            // Sağ ok
+                            InkWell(
+                              onTap: () {
+                                if (_tabController.index < 5) {
+                                  setState(() => _tabController
+                                      .animateTo(_tabController.index + 1));
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(16),
+                              child: Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: const Color(0xFF0288D1), width: 1),
+                                  color: Colors.white,
+                                ),
+                                child: const Icon(Icons.chevron_right,
+                                    size: 18, color: Color(0xFF0288D1)),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       Expanded(
@@ -13998,8 +15133,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                   _harcamalarSection(),
                                   const SizedBox(height: 12),
                                   _nakitSayimSection(),
-                                  const SizedBox(height: 12),
-                                  _ekBilgilerSection(),
                                   const SizedBox(height: 12),
                                   _kasaOzetiSection(),
                                   const SizedBox(height: 32),
@@ -16516,8 +17649,14 @@ class _OdemeYontemleriKartState extends State<_OdemeYontemleriKart> {
                 final digerAdi = item['digerEkranAdi'] as String? ?? '';
                 final tipRenk = tip == 'online'
                     ? const Color(0xFF0288D1)
-                    : const Color(0xFF6A1B9A);
-                final tipYazi = tip == 'online' ? 'Online' : 'Yemek Kartı';
+                    : tip == 'pulseKalemi'
+                        ? const Color(0xFF2E7D32)
+                        : const Color(0xFF6A1B9A);
+                final tipYazi = tip == 'online'
+                    ? 'Online'
+                    : tip == 'pulseKalemi'
+                        ? 'Pulse Kalemi'
+                        : 'Yemek Kartı';
                 return Container(
                   margin: const EdgeInsets.only(bottom: 6),
                   padding:
@@ -18365,8 +19504,11 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                       final miktar = (nd['miktar'] as num? ?? 0).toDouble();
                       final cins = nd['cins'] as String? ?? '';
                       if (miktar > 0 && cins.isNotEmpty)
-                        nakitDovizListesiGecmis
-                            .add({'cins': cins, 'miktar': miktar});
+                        nakitDovizListesiGecmis.add({
+                          'cins': cins,
+                          'miktar': miktar,
+                          'aciklama': nd['aciklama'] as String? ?? '',
+                        });
                     }
                     final gunlukKasaKalani =
                         ((data['gunlukKasaKalani'] as num?) ?? 0).toDouble();
@@ -18685,7 +19827,11 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                                                 : c;
                                                     final m =
                                                         d['miktar'] as double;
-                                                    return Text(
+                                                    final aciklamaG =
+                                                        d['aciklama']
+                                                                as String? ??
+                                                            '';
+                                                    final chip = Text(
                                                       '$sem${_binAyracSade(m)}',
                                                       style: TextStyle(
                                                           fontSize: 10,
@@ -18693,6 +19839,11 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                                           fontWeight:
                                                               FontWeight.w600),
                                                     );
+                                                    return aciklamaG.isNotEmpty
+                                                        ? Tooltip(
+                                                            message: aciklamaG,
+                                                            child: chip)
+                                                        : chip;
                                                   }).toList(),
                                                 ),
                                               ),
@@ -22627,25 +23778,26 @@ class _OzetEkraniState extends State<OzetEkrani> {
                           _fmt((h['tutar'] as num).toDouble()),
                         ),
                       ),
-                ...nakitDovizListesi
-                    .where((nd) => (nd['miktar'] as num? ?? 0) > 0)
-                    .map((nd) {
-                  final cins = nd['cins'] as String? ?? '';
-                  final sembol = cins == 'USD'
-                      ? r'$'
-                      : cins == 'EUR'
-                          ? '€'
-                          : cins == 'GBP'
-                              ? '£'
-                              : cins;
-                  final miktar = (nd['miktar'] as num).toDouble();
-                  return _kalemSatiri(
-                    nd['aciklama']?.toString().isNotEmpty == true
-                        ? nd['aciklama'].toString()
-                        : 'Nakit $cins Çıkış',
-                    '$sembol ${miktar.toStringAsFixed(2)}',
-                  );
-                }),
+                ...(() {
+                  final Map<String, double> dovizToplam = {};
+                  for (final nd in nakitDovizListesi
+                      .where((nd) => (nd['miktar'] as num? ?? 0) > 0)) {
+                    final cins = nd['cins'] as String? ?? '';
+                    dovizToplam[cins] = (dovizToplam[cins] ?? 0) +
+                        (nd['miktar'] as num).toDouble();
+                  }
+                  return dovizToplam.entries.map((e) {
+                    final sembol = e.key == 'USD'
+                        ? r'$'
+                        : e.key == 'EUR'
+                            ? '€'
+                            : e.key == 'GBP'
+                                ? '£'
+                                : e.key;
+                    return _kalemSatiri('Nakit ${e.key} Çıkış',
+                        '$sembol ${e.value.toStringAsFixed(2)}');
+                  });
+                })(),
               ],
             ),
           ),
