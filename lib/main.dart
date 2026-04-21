@@ -3708,6 +3708,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             .map((e) => MapEntry(e.key, e.value.text)),
       ),
       'pulseKontrolOnaylandi': _pulseKontrolOnaylandi,
+      'pulseResmiOkundu': _pulseOkundu,
+      'myDomResmiOkundu': _myDomOkundu,
       'harcamalar': _harcamalar
           .map(
             (h) => {
@@ -4389,439 +4391,192 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     }
     final bankaParasi = brutSatisProgram - toplamSonuc;
 
-    // Fark sayısı
-    // farkliSayisi tumKalemler üzerinden hesapla (Brüt Satış hariç)
-    int farkliSayisi = 0;
-    for (final k in tumKalemler) {
-      final adLowerK = (k['ad'] as String).toLowerCase();
-      if (adLowerK.contains('brüt') || adLowerK.contains('brut')) continue;
-      final pulseKey = k['pulseKey'] as String;
-      final tipK = k['tip'] as String;
-      final myDomValK = tipK == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-      final isPosOrYemekK = tipK == 'pos' ||
-          tipK == 'yemek' ||
-          (tipK == 'pulseKalemi' && myDomValK > 0);
-      final myDomCtrlK = _myDomKiyasCtrl[pulseKey];
-      final effectiveK = isPosOrYemekK
-          ? myDomValK
-          : (myDomCtrlK != null && myDomCtrlK.text.isNotEmpty
-              ? _parseDouble(myDomCtrlK.text)
-              : myDomValK);
-      final pulseCtrlK = _pulseKiyasCtrl[pulseKey];
-      final pulseValK =
-          pulseCtrlK != null ? _parseDouble(pulseCtrlK.text) : 0.0;
-      final farkK = effectiveK - pulseValK;
-      if (effectiveK > 0 && farkK.abs() >= 0.01) farkliSayisi++;
-    }
-    Widget satir({
-      required String etiket,
-      required String pulseKey,
-      required double myDomVal,
-      bool brutSatirMi = false,
-      bool bankaParasiMi = false,
-    }) {
-      final pulseCtrl = _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
-      final myDomCtrl = _myDomKiyasCtrl[pulseKey];
-      // POS ve yemek için direkt myDomVal, online için ctrl değeri
-      final isPosOrYemek =
-          pulseKey == 'pulsePos' || pulseKey.startsWith('yemek_');
-      final effectiveMyDom = isPosOrYemek
-          ? myDomVal
-          : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
-              ? _parseDouble(myDomCtrl.text)
-              : myDomVal);
-      final pulseVal = _parseDouble(pulseCtrl.text);
-      final fark = effectiveMyDom - pulseVal;
-      final eslesme = pulseCtrl.text.isNotEmpty && fark.abs() < 0.01;
-      final farkVar = pulseCtrl.text.isNotEmpty && !eslesme;
-      if (farkVar) farkliSayisi++;
-
-      if (bankaParasiMi) {
-        return Container(
-          margin: const EdgeInsets.only(bottom: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.teal[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.teal[200]!),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                  flex: 3,
-                  child: Text(etiket,
-                      style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.bold))),
-              Expanded(
-                flex: 3,
-                child: Text(
-                  _formatTL(myDomVal),
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color:
-                          myDomVal >= 0 ? Colors.teal[700] : Colors.red[700]),
-                ),
-              ),
-              const SizedBox(width: 6),
-              const SizedBox(
-                  width: 80,
-                  child: Text('otomatik',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(fontSize: 10, color: Colors.grey))),
-              const SizedBox(width: 6),
-              const SizedBox(width: 50),
-            ],
-          ),
-        );
-      }
-
-      return Container(
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: farkVar
-              ? Colors.red[50]
-              : eslesme
-                  ? Colors.green[50]
-                  : Colors.grey[50],
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: farkVar
-                ? Colors.red[200]!
-                : eslesme
-                    ? Colors.green[200]!
-                    : Colors.grey[200]!,
-          ),
-        ),
-        child: Row(
-          children: [
-            // Kalem adı
-            Expanded(
-              flex: 3,
-              child: Text(etiket,
-                  style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w500)),
-            ),
-            // Pulse giriş
-            SizedBox(
-              width: 80,
-              child: TextField(
-                controller: pulseCtrl,
-                enabled: !_readOnly,
-                textAlign: TextAlign.right,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [BinAraciFormatter()],
-                style: const TextStyle(fontSize: 11),
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                  hintText: '0,00',
-                  hintStyle: TextStyle(fontSize: 10, color: Colors.grey[400]),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6)),
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
-            ),
-            const SizedBox(width: 6),
-            // My Dominos / Program değeri — manuel giriş
-            SizedBox(
-              width: 80,
-              child: Builder(builder: (ctx) {
-                // POS ve yemek kartı için ctrl yerine direkt değer göster
-                // Online ve pulse kalemleri için ctrl kullan
-                final isPosOrYemek =
-                    pulseKey == 'pulsePos' || pulseKey.startsWith('yemek_');
-                if (isPosOrYemek) {
-                  // Direkt program değeri — her zaman güncel
-                  return Container(
-                    height: 32,
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.green[50],
-                      border: Border.all(color: Colors.green[200]!),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      myDomVal > 0
-                          ? _formatTL(myDomVal).replaceAll(' ₺', '')
-                          : '0,00',
-                      style: TextStyle(fontSize: 11, color: Colors.green[800]),
-                      textAlign: TextAlign.right,
-                    ),
-                  );
-                }
-                // Online için ctrl — manuel giriş destekli
-                final ctrl =
-                    _myDomKiyasCtrl[pulseKey] ?? TextEditingController();
-                if (ctrl.text.isEmpty && myDomVal > 0) {
-                  ctrl.text = _formatTL(myDomVal).replaceAll(' ₺', '');
-                }
-                return TextField(
-                  controller: ctrl,
-                  enabled: !_readOnly,
-                  textAlign: TextAlign.right,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [BinAraciFormatter()],
-                  style: const TextStyle(fontSize: 11),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    hintText: '0,00',
-                    hintStyle: TextStyle(fontSize: 10, color: Colors.grey[400]),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6)),
-                    filled: true,
-                    fillColor: Colors.green[50],
-                  ),
-                  onChanged: (_) => setState(() {}),
-                );
-              }),
-            ),
-            const SizedBox(width: 6),
-            // Fark
-            SizedBox(
-              width: 50,
-              child: Text(
-                pulseCtrl.text.isEmpty
-                    ? '—'
-                    : eslesme
-                        ? '✓'
-                        : '${fark >= 0 ? '+' : ''}${_formatTL(fark)}',
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: pulseCtrl.text.isEmpty
-                      ? Colors.grey[400]
-                      : eslesme
-                          ? Colors.green[700]
-                          : Colors.red[700],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     return Stack(
       children: [
-        // İçerik
         SingleChildScrollView(
-          padding: EdgeInsets.only(
-            left: 12,
-            right: 12,
-            bottom: 12,
-            top: (_pulseOkunuyor ||
-                    _myDominosOkunuyor ||
-                    _okumaMesaji.isNotEmpty)
-                ? 44
-                : 12,
-          ),
+          padding: const EdgeInsets.all(16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Butonlar
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _pulseOkunuyor
-                            ? ElevatedButton.icon(
-                                onPressed: () => setState(() {
-                                  _pulseIptalEdildi = true;
-                                  _pulseOkunuyor = false;
-                                }),
-                                icon: const Icon(Icons.cancel, size: 15),
-                                label: const Text('İptal',
-                                    style: TextStyle(fontSize: 12)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red[700],
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 10),
-                                ),
-                              )
-                            : ElevatedButton.icon(
-                                onPressed: _readOnly || _myDominosOkunuyor
-                                    ? null
-                                    : _pulseResmiOku,
-                                icon: Icon(
-                                  _pulseOkundu
-                                      ? Icons.check_circle
-                                      : Icons.camera_alt,
-                                  size: 15,
-                                ),
-                                label: Text(
-                                  _pulseOkundu ? 'Pulse ✓' : 'Pulse Resmi',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: _pulseOkundu
-                                      ? Colors.green[700]
-                                      : const Color(0xFF0288D1),
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 10),
-                                ),
-                              ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _myDominosOkunuyor
-                            ? ElevatedButton.icon(
-                                onPressed: () => setState(() {
-                                  _myDomIptalEdildi = true;
-                                  _myDominosOkunuyor = false;
-                                }),
-                                icon: const Icon(Icons.cancel, size: 15),
-                                label: const Text('İptal',
-                                    style: TextStyle(fontSize: 12)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red[700],
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 10),
-                                ),
-                              )
-                            : ElevatedButton.icon(
-                                onPressed: _readOnly || _pulseOkunuyor
-                                    ? null
-                                    : _myDominosResmiOku,
-                                icon: Icon(
-                                  _myDomOkundu
-                                      ? Icons.check_circle
-                                      : Icons.camera_alt,
-                                  size: 15,
-                                ),
-                                label: Text(
-                                  _myDomOkundu ? 'My Dom. ✓' : 'My Dominos',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: _myDomOkundu
-                                      ? Colors.green[700]
-                                      : const Color(0xFFFF8F00),
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 10),
-                                ),
-                              ),
-                      ),
-                    ],
+              // Pulse / MyDom okuma butonları
+              Row(children: [
+                Expanded(
+                    child: ElevatedButton.icon(
+                  onPressed:
+                      _readOnly || _myDominosOkunuyor ? null : _pulseResmiOku,
+                  icon: Icon(
+                      _pulseOkundu ? Icons.check_circle : Icons.camera_alt,
+                      size: 15),
+                  label: Text(
+                      _pulseOkunuyor
+                          ? 'Okunuyor...'
+                          : _pulseOkundu
+                              ? 'Pulse ✓'
+                              : 'Pulse Resmi',
+                      style: const TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _pulseOkundu
+                        ? Colors.green[700]
+                        : const Color(0xFF0288D1),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
-                ),
-              ),
+                )),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: ElevatedButton.icon(
+                  onPressed:
+                      _readOnly || _pulseOkunuyor ? null : _myDominosResmiOku,
+                  icon: Icon(
+                      _myDomOkundu ? Icons.check_circle : Icons.camera_alt,
+                      size: 15),
+                  label: Text(
+                      _myDominosOkunuyor
+                          ? 'Okunuyor...'
+                          : _myDomOkundu
+                              ? 'My Dom. ✓'
+                              : 'My Dominos',
+                      style: const TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _myDomOkundu
+                        ? Colors.green[700]
+                        : const Color(0xFFFF8F00),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                )),
+              ]),
               const SizedBox(height: 10),
 
-              // Brüt Satış — büyük ve belirgin
-              Card(
-                color: Colors.blue[50],
-                child: Padding(
+              // ── Üst Alan: Brüt Satış + Banka Parası ──
+              Row(children: [
+                // Brüt Satış kartı
+                Expanded(
+                    child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF93C5FD)),
+                  ),
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text('Brüt Satış',
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Brüt Satış',
                             style: TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.bold)),
-                      ),
-                      SizedBox(
-                        width: 100,
-                        child: TextField(
-                          controller: _pulseKiyasCtrl['pulseBrut'],
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1D4ED8))),
+                        const SizedBox(height: 2),
+                        const Text('Pulse değeri — düzenle',
+                            style: TextStyle(
+                                fontSize: 8, color: Color(0xFF93C5FD))),
+                        const SizedBox(height: 6),
+                        TextField(
+                          controller: _pulseKiyasCtrl['pulseBrut'] ??
+                              TextEditingController(),
                           enabled: !_readOnly,
                           textAlign: TextAlign.right,
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true),
                           inputFormatters: [BinAraciFormatter()],
                           style: const TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.bold),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1D4ED8)),
                           decoration: InputDecoration(
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 8),
+                                horizontal: 8, vertical: 8),
                             hintText: '0,00',
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6)),
                             filled: true,
-                            fillColor: Colors.blue[100],
+                            fillColor: const Color(0xFFEFF6FF),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide:
+                                    const BorderSide(color: Color(0xFF93C5FD))),
+                            enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF93C5FD), width: 1.5)),
+                            focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF1D4ED8), width: 1.5)),
                           ),
-                          onChanged: (_) => setState(() {}),
+                          onChanged: (_) {
+                            setState(() {});
+                            if (!_yukleniyor) {
+                              _degisiklikVar = true;
+                              if (_duzenlemeAcik) _gercekDegisiklikVar = true;
+                            }
+                            _otomatikKaydetBaslat();
+                          },
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 100,
-                        child: Text(
-                          _parseDouble(_gunlukSatisCtrl.text) > 0
-                              ? _formatTL(_parseDouble(_gunlukSatisCtrl.text))
-                              : '—',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue[800]),
-                        ),
-                      ),
-                    ],
+                      ]),
+                )),
+                const SizedBox(width: 8),
+                // Banka Parası kartı
+                Expanded(
+                    child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: bankaParasi >= 0
+                            ? const Color(0xFF86EFAC)
+                            : const Color(0xFFFCA5A5)),
                   ),
-                ),
-              ),
-              const SizedBox(height: 6),
-
-              // Banka Parası
-              Card(
-                color: Colors.teal[50],
-                child: Padding(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text('Banka Parası',
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Banka Parası',
                             style: TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.bold)),
-                      ),
-                      Text(
-                        _formatTL(bankaParasi),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: bankaParasi >= 0
-                              ? Colors.teal[700]
-                              : Colors.red[700],
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF0F766E))),
+                        const SizedBox(height: 2),
+                        const Text('Brüt − POS − Yemek − Online',
+                            style: TextStyle(
+                                fontSize: 8, color: Color(0xFF94A3B8))),
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: bankaParasi >= 0
+                                ? const Color(0xFFF0FDF4)
+                                : const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                                color: bankaParasi >= 0
+                                    ? const Color(0xFF86EFAC)
+                                    : const Color(0xFFFCA5A5),
+                                width: 1.5),
+                          ),
+                          child: Text(
+                            _formatTL(bankaParasi),
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: bankaParasi >= 0
+                                    ? const Color(0xFF15803D)
+                                    : const Color(0xFFDC2626)),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      const SizedBox(
-                          width: 100,
-                          child: Text('otomatik',
-                              textAlign: TextAlign.right,
-                              style:
-                                  TextStyle(fontSize: 11, color: Colors.grey))),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
+                      ]),
+                )),
+              ]),
+              const SizedBox(height: 12),
 
-              const SizedBox(height: 10),
-              const SizedBox(height: 10),
-
-              // ── Kıyaslama listesi — fark olanlar üstte ──
+              // ── Kıyaslama listesi — sabit sıra ──
               Builder(builder: (ctx) {
-                // Kalemler: brüt satış hariç, fark olanlar önce
+                // Kalemler: brüt satış hariç, sabit pulseSira sırası
                 final gorunenler = tumKalemler.where((k) {
                   final adL = (k['ad'] as String).toLowerCase();
                   return !adL.contains('brüt') && !adL.contains('brut');
@@ -4868,7 +4623,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       fillColor:
                           enabled ? const Color(0xFFEFF6FF) : Colors.grey[100],
                     ),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) {
+                      setState(() {});
+                      if (!_yukleniyor) _degisiklikVar = true;
+                    },
                   );
                 }
 
@@ -4913,7 +4671,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                       fillColor:
                           enabled ? const Color(0xFFFFF7ED) : Colors.grey[100],
                     ),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) {
+                      setState(() {});
+                      if (!_yukleniyor) _degisiklikVar = true;
+                    },
                   );
                 }
 
@@ -4927,7 +4688,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   final isPosOrYemek = tip == 'pos' ||
                       tip == 'yemek' ||
                       (tip == 'pulseKalemi' && myDomVal > 0);
-                  final isOnline = tip == 'online';
                   final pulseCtrl =
                       _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
                   final myDomCtrl = _myDomKiyasCtrl[pulseKey];
@@ -4937,42 +4697,75 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           ? _parseDouble(myDomCtrl.text)
                           : myDomVal);
                   final pulseVal = _parseDouble(pulseCtrl.text);
-                  final fark = effectiveMyDom - pulseVal;
-                  final eslesme = fark.abs() < 0.01 &&
-                      (pulseCtrl.text.isNotEmpty || effectiveMyDom == 0);
                   final pulseBos =
                       pulseCtrl.text.isEmpty && effectiveMyDom == 0;
+                  final fark = effectiveMyDom - pulseVal;
+                  final eslesme = !pulseBos && fark.abs() < 0.01;
                   final acik = _acikSatirlar.contains(pulseKey);
+                  final seritRenk = pulseBos
+                      ? const Color(0xFFE2E8F0)
+                      : eslesme
+                          ? const Color(0xFF22C55E)
+                          : const Color(0xFFEF4444);
 
-                  // ── FARK VAR ──
-                  if (!eslesme && !pulseBos) {
+                  // GİRİLMEMİŞ
+                  if (pulseBos) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 3),
+                      decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border(
+                              left: BorderSide(color: seritRenk, width: 4))),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        child: Row(children: [
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text('$pulseSira. $ad',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF94A3B8))),
+                                if (effectiveMyDom > 0)
+                                  Text(
+                                      isPosOrYemek
+                                          ? 'Program: ${_formatTL(effectiveMyDom)}'
+                                          : 'MyDom: ${_formatTL(effectiveMyDom)}',
+                                      style: const TextStyle(
+                                          fontSize: 9,
+                                          color: Color(0xFFCBD5E1))),
+                              ])),
+                          SizedBox(width: 90, child: pulseInputW(pulseCtrl)),
+                          const SizedBox(width: 8),
+                          const Text('—',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFFCBD5E1),
+                                  fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
+                    );
+                  }
+
+                  // FARK VAR
+                  if (!eslesme) {
                     final ekle = fark > 0;
                     return Container(
                       margin: const EdgeInsets.only(bottom: 5),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFFCA5A5)),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.red.withOpacity(0.05),
-                              blurRadius: 4)
-                        ],
-                      ),
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border(
+                              left: BorderSide(color: seritRenk, width: 4))),
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Üst: kalem adı + etiket
-                            Container(
-                              decoration: const BoxDecoration(
-                                border: Border(
-                                    left: BorderSide(
-                                        color: Color(0xFFEF4444), width: 4)),
-                                borderRadius: BorderRadius.only(
-                                    topLeft: Radius.circular(10),
-                                    topRight: Radius.circular(10)),
-                              ),
-                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 5),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 4),
                               child: Row(children: [
                                 Expanded(
                                     child: Column(
@@ -4994,9 +4787,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                               fontSize: 9,
                                               color: Color(0xFF94A3B8))),
                                     ])),
+                                const SizedBox(width: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
+                                      horizontal: 7, vertical: 3),
                                   decoration: BoxDecoration(
                                     color: ekle
                                         ? const Color(0xFFF0FDF4)
@@ -5012,18 +4806,52 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                         ? '+ ${_formatTL(fark).replaceAll(' ₺', '')} ekle'
                                         : '− ${_formatTL(fark.abs()).replaceAll(' ₺', '')} çıkar',
                                     style: TextStyle(
-                                        fontSize: 10,
+                                        fontSize: 9,
                                         fontWeight: FontWeight.w700,
                                         color: ekle
                                             ? const Color(0xFF15803D)
                                             : const Color(0xFFDC2626)),
                                   ),
                                 ),
+                                const SizedBox(width: 6),
+                                GestureDetector(
+                                  onTap: _readOnly
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            _pulseKiyasCtrl.putIfAbsent(
+                                                pulseKey,
+                                                () => TextEditingController());
+                                            _pulseKiyasCtrl[pulseKey]!.text =
+                                                effectiveMyDom > 0
+                                                    ? _formatTL(effectiveMyDom)
+                                                        .replaceAll(' ₺', '')
+                                                    : '';
+                                            _degisiklikVar = true;
+                                            if (_duzenlemeAcik)
+                                              _gercekDegisiklikVar = true;
+                                          });
+                                          _otomatikKaydetBaslat();
+                                        },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                        color: const Color(0xFFF0F9FF),
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(
+                                            color: const Color(0xFF0288D1))),
+                                    child: const Text('Eşleştir ✓',
+                                        style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF0288D1))),
+                                  ),
+                                ),
                               ]),
                             ),
-                            // Alt: kutular
                             Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+                              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
                               child: Row(children: [
                                 Expanded(
                                     child: Column(
@@ -5039,28 +4867,27 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       pulseInputW(pulseCtrl),
                                     ])),
                                 const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8),
-                                  child: Text('↔',
-                                      style: TextStyle(
-                                          fontSize: 14,
-                                          color: Color(0xFF94A3B8))),
-                                ),
+                                    padding:
+                                        EdgeInsets.symmetric(horizontal: 8),
+                                    child: Text('↔',
+                                        style: TextStyle(
+                                            fontSize: 14,
+                                            color: Color(0xFF94A3B8)))),
                                 Expanded(
                                     child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                       Text(
-                                        isPosOrYemek
-                                            ? 'PROGRAM — sabit'
-                                            : 'MYDOM — düzenle',
-                                        style: TextStyle(
-                                            fontSize: 8,
-                                            fontWeight: FontWeight.w700,
-                                            color: isPosOrYemek
-                                                ? const Color(0xFF64748B)
-                                                : const Color(0xFFC2410C)),
-                                      ),
+                                          isPosOrYemek
+                                              ? 'PROGRAM — sabit'
+                                              : 'MYDOM — düzenle',
+                                          style: TextStyle(
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.w700,
+                                              color: isPosOrYemek
+                                                  ? const Color(0xFF64748B)
+                                                  : const Color(0xFFC2410C))),
                                       const SizedBox(height: 2),
                                       isPosOrYemek
                                           ? Container(
@@ -5070,23 +4897,24 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                                       horizontal: 8,
                                                       vertical: 8),
                                               decoration: BoxDecoration(
-                                                color: Colors.grey[100],
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                                border: Border.all(
-                                                    color: Colors.grey[300]!),
-                                              ),
+                                                  color: Colors.grey[100],
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                  border: Border.all(
+                                                      color:
+                                                          Colors.grey[300]!)),
                                               child: Text(
-                                                effectiveMyDom > 0
-                                                    ? _formatTL(effectiveMyDom)
-                                                        .replaceAll(' ₺', '')
-                                                    : '0,00',
-                                                textAlign: TextAlign.right,
-                                                style: TextStyle(
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: Colors.grey[600]),
-                                              ),
+                                                  effectiveMyDom > 0
+                                                      ? _formatTL(
+                                                              effectiveMyDom)
+                                                          .replaceAll(' ₺', '')
+                                                      : '0,00',
+                                                  textAlign: TextAlign.right,
+                                                  style: TextStyle(
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: Colors.grey[600])),
                                             )
                                           : myDomInputW(myDomCtrl),
                                     ])),
@@ -5110,79 +4938,24 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     );
                   }
 
-                  // ── GİRİLMEMİŞ ──
-                  if (pulseBos) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 3),
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(8),
-                          bottomLeft: Radius.circular(8),
-                          topRight: Radius.circular(8),
-                          bottomRight: Radius.circular(8),
-                        ),
-                        border: Border(
-                            left:
-                                BorderSide(color: Color(0xFFE2E8F0), width: 4)),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 8),
-                        child: Row(children: [
-                          Expanded(
-                              child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                Text('$pulseSira. $ad',
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF94A3B8))),
-                                Text(
-                                    isOnline
-                                        ? 'Online'
-                                        : isPosOrYemek
-                                            ? 'Program'
-                                            : '',
-                                    style: const TextStyle(
-                                        fontSize: 9, color: Color(0xFFCBD5E1))),
-                              ])),
-                          SizedBox(width: 90, child: pulseInputW(pulseCtrl)),
-                          const SizedBox(width: 8),
-                          const Text('—',
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  color: Color(0xFFCBD5E1),
-                                  fontWeight: FontWeight.w700)),
-                        ]),
-                      ),
-                    );
-                  }
-
-                  // ── EŞLEŞİYOR ──
+                  // EŞLEŞİYOR — açılmış
                   if (acik) {
-                    // Açılmış — sarı şerit, her iki kutu düzenlenebilir
+                    // Düzenleme için geçici değerleri sakla (ilk açılışta)
+                    final eskiPulseVal = pulseVal;
+                    final eskiMyDomVal = myDomCtrl?.text ?? '';
                     return Container(
                       margin: const EdgeInsets.only(bottom: 5),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFFBBF24)),
-                      ),
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: const Border(
+                              left: BorderSide(
+                                  color: Color(0xFFF59E0B), width: 4))),
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              decoration: const BoxDecoration(
-                                border: Border(
-                                    left: BorderSide(
-                                        color: Color(0xFFF59E0B), width: 4)),
-                                borderRadius: BorderRadius.only(
-                                    topLeft: Radius.circular(10),
-                                    topRight: Radius.circular(10)),
-                              ),
-                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 5),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 4),
                               child: Row(children: [
                                 Expanded(
                                     child: Column(
@@ -5198,6 +4971,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                               fontSize: 9,
                                               color: Color(0xFFF59E0B))),
                                     ])),
+                                // İptal butonu
                                 GestureDetector(
                                   onTap: () => setState(
                                       () => _acikSatirlar.remove(pulseKey)),
@@ -5206,17 +4980,49 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                         horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
                                         color: Colors.grey[100],
-                                        borderRadius: BorderRadius.circular(5)),
-                                    child: const Text('✕ Kapat',
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(
+                                            color: Colors.grey[300]!)),
+                                    child: const Text('İptal',
                                         style: TextStyle(
                                             fontSize: 10,
                                             color: Color(0xFF64748B))),
                                   ),
                                 ),
+                                const SizedBox(width: 6),
+                                // Kaydet butonu
+                                GestureDetector(
+                                  onTap: _readOnly
+                                      ? null
+                                      : () {
+                                          setState(() =>
+                                              _acikSatirlar.remove(pulseKey));
+                                          if (!_yukleniyor) {
+                                            setState(() {
+                                              _degisiklikVar = true;
+                                              if (_duzenlemeAcik)
+                                                _gercekDegisiklikVar = true;
+                                            });
+                                          }
+                                          _otomatikKaydetBaslat();
+                                        },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                        color: const Color(0xFF0288D1),
+                                        borderRadius: BorderRadius.circular(5)),
+                                    child: const Text('Kaydet',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700)),
+                                  ),
+                                ),
                               ]),
                             ),
                             Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+                              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
                               child: Row(children: [
                                 Expanded(
                                     child: Column(
@@ -5232,28 +5038,27 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       pulseInputW(pulseCtrl),
                                     ])),
                                 const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8),
-                                  child: Text('↔',
-                                      style: TextStyle(
-                                          fontSize: 14,
-                                          color: Color(0xFF94A3B8))),
-                                ),
+                                    padding:
+                                        EdgeInsets.symmetric(horizontal: 8),
+                                    child: Text('↔',
+                                        style: TextStyle(
+                                            fontSize: 14,
+                                            color: Color(0xFF94A3B8)))),
                                 Expanded(
                                     child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                       Text(
-                                        isPosOrYemek
-                                            ? 'PROGRAM — sabit'
-                                            : 'MYDOM — düzenle',
-                                        style: TextStyle(
-                                            fontSize: 8,
-                                            fontWeight: FontWeight.w700,
-                                            color: isPosOrYemek
-                                                ? const Color(0xFF64748B)
-                                                : const Color(0xFFC2410C)),
-                                      ),
+                                          isPosOrYemek
+                                              ? 'PROGRAM — sabit'
+                                              : 'MYDOM — düzenle',
+                                          style: TextStyle(
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.w700,
+                                              color: isPosOrYemek
+                                                  ? const Color(0xFF64748B)
+                                                  : const Color(0xFFC2410C))),
                                       const SizedBox(height: 2),
                                       isPosOrYemek
                                           ? Container(
@@ -5263,23 +5068,24 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                                       horizontal: 8,
                                                       vertical: 8),
                                               decoration: BoxDecoration(
-                                                color: Colors.grey[100],
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                                border: Border.all(
-                                                    color: Colors.grey[300]!),
-                                              ),
+                                                  color: Colors.grey[100],
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                  border: Border.all(
+                                                      color:
+                                                          Colors.grey[300]!)),
                                               child: Text(
-                                                effectiveMyDom > 0
-                                                    ? _formatTL(effectiveMyDom)
-                                                        .replaceAll(' ₺', '')
-                                                    : '0,00',
-                                                textAlign: TextAlign.right,
-                                                style: TextStyle(
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: Colors.grey[600]),
-                                              ),
+                                                  effectiveMyDom > 0
+                                                      ? _formatTL(
+                                                              effectiveMyDom)
+                                                          .replaceAll(' ₺', '')
+                                                      : '0,00',
+                                                  textAlign: TextAlign.right,
+                                                  style: TextStyle(
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: Colors.grey[600])),
                                             )
                                           : myDomInputW(myDomCtrl),
                                     ])),
@@ -5303,20 +5109,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     );
                   }
 
-                  // Kapalı eşleşen — kompakt
+                  // EŞLEŞİYOR — kompakt
                   return Container(
                     margin: const EdgeInsets.only(bottom: 3),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(8),
-                        bottomLeft: Radius.circular(8),
-                        topRight: Radius.circular(8),
-                        bottomRight: Radius.circular(8),
-                      ),
-                      border: Border(
-                          left: BorderSide(color: Color(0xFF22C55E), width: 4)),
-                    ),
+                    decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border(
+                            left: BorderSide(color: seritRenk, width: 4))),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 7),
@@ -5331,12 +5131,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       fontWeight: FontWeight.w600,
                                       color: Color(0xFF1E293B))),
                               Text(
-                                isPosOrYemek
-                                    ? 'Program: ${_formatTL(effectiveMyDom)}'
-                                    : 'MyDom: ${_formatTL(effectiveMyDom)}',
-                                style: const TextStyle(
-                                    fontSize: 9, color: Color(0xFF64748B)),
-                              ),
+                                  isPosOrYemek
+                                      ? 'Program: ${_formatTL(effectiveMyDom)}'
+                                      : 'MyDom: ${_formatTL(effectiveMyDom)}',
+                                  style: const TextStyle(
+                                      fontSize: 9, color: Color(0xFF64748B))),
                             ])),
                         SizedBox(
                           width: 90,
@@ -5344,19 +5143,18 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 7),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF0FDF4),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                  color: const Color(0xFF86EFAC), width: 1.5),
-                            ),
+                                color: const Color(0xFFF0FDF4),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                    color: const Color(0xFF86EFAC),
+                                    width: 1.5)),
                             child: Text(
-                              _formatTL(pulseVal).replaceAll(' ₺', ''),
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF15803D)),
-                            ),
+                                _formatTL(pulseVal).replaceAll(' ₺', ''),
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF15803D))),
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -5373,11 +5171,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                             width: 26,
                             height: 26,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(6),
-                              border:
-                                  Border.all(color: const Color(0xFFE2E8F0)),
-                            ),
+                                color: const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(6),
+                                border:
+                                    Border.all(color: const Color(0xFFE2E8F0))),
                             child: const Icon(Icons.edit,
                                 size: 13, color: Color(0xFF64748B)),
                           ),
@@ -5387,76 +5184,40 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                   );
                 }
 
-                // Fark olanlar önce, sonra eşleşenler, en sonda girilmemişler
-                final farkVar = gorunenler.where((k) {
+                // Özet bar hesapla
+                int farkSayisi = 0, eslesiyorSayisi = 0, girilmemisSayisi = 0;
+                for (final k in gorunenler) {
                   final pulseKey = k['pulseKey'] as String;
                   final tip = k['tip'] as String;
-                  final myDomVal =
+                  final myDomVal2 =
                       tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-                  final isPosOrYemek = tip == 'pos' ||
+                  final isPOY = tip == 'pos' ||
                       tip == 'yemek' ||
-                      (tip == 'pulseKalemi' && myDomVal > 0);
-                  final pulseCtrl =
+                      (tip == 'pulseKalemi' && myDomVal2 > 0);
+                  final pCtrl =
                       _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
-                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
-                  final effectiveMyDom = isPosOrYemek
-                      ? myDomVal
-                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
-                          ? _parseDouble(myDomCtrl.text)
-                          : myDomVal);
-                  final fark = effectiveMyDom - _parseDouble(pulseCtrl.text);
-                  final eslesme = fark.abs() < 0.01 &&
-                      (pulseCtrl.text.isNotEmpty || effectiveMyDom == 0);
-                  final bos = pulseCtrl.text.isEmpty && effectiveMyDom == 0;
-                  return !eslesme && !bos;
-                }).toList();
-
-                final eslesenler = gorunenler.where((k) {
-                  final pulseKey = k['pulseKey'] as String;
-                  final tip = k['tip'] as String;
-                  final myDomVal =
-                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-                  final isPosOrYemek = tip == 'pos' ||
-                      tip == 'yemek' ||
-                      (tip == 'pulseKalemi' && myDomVal > 0);
-                  final pulseCtrl =
-                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
-                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
-                  final effectiveMyDom = isPosOrYemek
-                      ? myDomVal
-                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
-                          ? _parseDouble(myDomCtrl.text)
-                          : myDomVal);
-                  final fark = effectiveMyDom - _parseDouble(pulseCtrl.text);
-                  return fark.abs() < 0.01 &&
-                      (pulseCtrl.text.isNotEmpty || effectiveMyDom == 0);
-                }).toList();
-
-                final girilmemis = gorunenler.where((k) {
-                  final pulseKey = k['pulseKey'] as String;
-                  final tip = k['tip'] as String;
-                  final myDomVal =
-                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-                  final isPosOrYemek = tip == 'pos' ||
-                      tip == 'yemek' ||
-                      (tip == 'pulseKalemi' && myDomVal > 0);
-                  final pulseCtrl =
-                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
-                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
-                  final effectiveMyDom = isPosOrYemek
-                      ? myDomVal
-                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
-                          ? _parseDouble(myDomCtrl.text)
-                          : myDomVal);
-                  return pulseCtrl.text.isEmpty && effectiveMyDom == 0;
-                }).toList();
+                  final mCtrl = _myDomKiyasCtrl[pulseKey];
+                  final effMD = isPOY
+                      ? myDomVal2
+                      : (mCtrl != null && mCtrl.text.isNotEmpty
+                          ? _parseDouble(mCtrl.text)
+                          : myDomVal2);
+                  final bos = pCtrl.text.isEmpty && effMD == 0;
+                  final f = effMD - _parseDouble(pCtrl.text);
+                  if (bos)
+                    girilmemisSayisi++;
+                  else if (f.abs() < 0.01)
+                    eslesiyorSayisi++;
+                  else
+                    farkSayisi++;
+                }
 
                 return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Özet bar
                       Row(children: [
-                        if (farkVar.isNotEmpty)
+                        if (farkSayisi > 0)
                           Expanded(
                               child: Container(
                             margin: const EdgeInsets.only(right: 4),
@@ -5467,7 +5228,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                 border:
                                     Border.all(color: const Color(0xFFFCA5A5))),
                             child: Column(children: [
-                              Text('${farkVar.length}',
+                              Text('$farkSayisi',
                                   style: const TextStyle(
                                       fontSize: 20,
                                       fontWeight: FontWeight.w700,
@@ -5477,11 +5238,12 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       fontSize: 9, color: Color(0xFFDC2626))),
                             ]),
                           )),
-                        if (eslesenler.isNotEmpty)
+                        if (eslesiyorSayisi > 0)
                           Expanded(
                               child: Container(
                             margin: EdgeInsets.only(
-                                right: girilmemis.isNotEmpty ? 4 : 0),
+                                left: farkSayisi > 0 ? 4 : 0,
+                                right: girilmemisSayisi > 0 ? 4 : 0),
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             decoration: BoxDecoration(
                                 color: const Color(0xFFF0FDF4),
@@ -5489,7 +5251,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                 border:
                                     Border.all(color: const Color(0xFF86EFAC))),
                             child: Column(children: [
-                              Text('${eslesenler.length}',
+                              Text('$eslesiyorSayisi',
                                   style: const TextStyle(
                                       fontSize: 20,
                                       fontWeight: FontWeight.w700,
@@ -5499,7 +5261,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                       fontSize: 9, color: Color(0xFF15803D))),
                             ]),
                           )),
-                        if (girilmemis.isNotEmpty)
+                        if (girilmemisSayisi > 0)
                           Expanded(
                               child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -5509,7 +5271,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                 border:
                                     Border.all(color: const Color(0xFFE2E8F0))),
                             child: Column(children: [
-                              Text('${girilmemis.length}',
+                              Text('$girilmemisSayisi',
                                   style: const TextStyle(
                                       fontSize: 20,
                                       fontWeight: FontWeight.w700,
@@ -5521,112 +5283,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           )),
                       ]),
                       const SizedBox(height: 10),
-
-                      // Fark var
-                      if (farkVar.isNotEmpty) ...[
-                        Row(children: [
-                          const Text('⚠ Fark var',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFFDC2626))),
-                          const SizedBox(width: 8),
-                          Expanded(
-                              child: Container(
-                                  height: 0.5, color: const Color(0xFFE2E8F0))),
-                        ]),
-                        const SizedBox(height: 5),
-                        ...farkVar.map((k) => _satir(k)),
-                        const SizedBox(height: 6),
-                      ],
-
-                      // Eşleşiyor
-                      if (eslesenler.isNotEmpty) ...[
-                        Row(children: [
-                          const Text('✓ Eşleşiyor',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF16A34A))),
-                          const SizedBox(width: 8),
-                          Expanded(
-                              child: Container(
-                                  height: 0.5, color: const Color(0xFFE2E8F0))),
-                        ]),
-                        const SizedBox(height: 5),
-                        ...eslesenler.map((k) => _satir(k)),
-                        const SizedBox(height: 6),
-                      ],
-
-                      // Girilmemiş
-                      if (girilmemis.isNotEmpty) ...[
-                        Row(children: [
-                          const Text('— Girilmemiş',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF94A3B8))),
-                          const SizedBox(width: 8),
-                          Expanded(
-                              child: Container(
-                                  height: 0.5, color: const Color(0xFFE2E8F0))),
-                        ]),
-                        const SizedBox(height: 5),
-                        ...girilmemis.map((k) => _satir(k)),
-                      ],
+                      // Sabit sıralı liste
+                      ...gorunenler.map((k) => _satir(k)),
                     ]);
               }),
-
-              // Pulse kontrol onay butonu
-              if (farkliSayisi > 0)
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange[300]!),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.warning_amber,
-                              color: Colors.orange[700], size: 16),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              '$farkliSayisi kalemde fark var — Pulse\'ta düzeltin',
-                              style: TextStyle(
-                                  color: Colors.orange[800],
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                )
-              else if (_pulseKiyasCtrl.values.any((c) => c.text.isNotEmpty))
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.check_circle,
-                          color: Colors.green[700], size: 16),
-                      const SizedBox(width: 6),
-                      Text('Tüm kalemler eşleşiyor ✓',
-                          style: TextStyle(
-                              color: Colors.green[700],
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
 
               const SizedBox(height: 8),
 
@@ -5655,27 +5315,62 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           ],
                         ),
                       )
-                    : Tooltip(
-                        message: farkliSayisi > 0
-                            ? '$farkliSayisi kalemde fark var, önce Pulse\'ta düzeltin'
-                            : '',
-                        child: ElevatedButton.icon(
-                          onPressed: (_readOnly || farkliSayisi > 0)
-                              ? null
-                              : () =>
-                                  setState(() => _pulseKontrolOnaylandi = true),
-                          icon: const Icon(Icons.check_circle_outline),
-                          label: const Text(
-                              'Pulse\'u kontrol ettim, veriler doğru'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: farkliSayisi > 0
-                                ? Colors.grey[400]
-                                : Colors.orange[700],
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                    : Builder(builder: (bctx) {
+                        // Hiç veri girilmemiş mi kontrol et
+                        final hicVeriYok = !_pulseKiyasCtrl.values
+                                .any((c) => c.text.isNotEmpty) &&
+                            !_myDomKiyasCtrl.values
+                                .any((c) => c.text.isNotEmpty);
+                        // Fark sayısını yeni mantıkla hesapla (bos=girilmemis, saymaz)
+                        int yeniFarkSayisi = 0;
+                        for (final k in tumKalemler) {
+                          final adL = (k['ad'] as String).toLowerCase();
+                          if (adL.contains('brüt') || adL.contains('brut'))
+                            continue;
+                          final pk = k['pulseKey'] as String;
+                          final t = k['tip'] as String;
+                          final mdv = t == 'pos'
+                              ? _toplamPos
+                              : (k['myDomVal'] as double);
+                          final ipoy = t == 'pos' ||
+                              t == 'yemek' ||
+                              (t == 'pulseKalemi' && mdv > 0);
+                          final pc =
+                              _pulseKiyasCtrl[pk] ?? TextEditingController();
+                          final mc = _myDomKiyasCtrl[pk];
+                          final eff = ipoy
+                              ? mdv
+                              : (mc != null && mc.text.isNotEmpty
+                                  ? _parseDouble(mc.text)
+                                  : mdv);
+                          final bos = pc.text.isEmpty && eff == 0;
+                          if (!bos &&
+                              (eff - _parseDouble(pc.text)).abs() >= 0.01)
+                            yeniFarkSayisi++;
+                        }
+                        return Tooltip(
+                          message: yeniFarkSayisi > 0
+                              ? '$yeniFarkSayisi kalemde fark var, önce Pulse\'ta düzeltin'
+                              : '',
+                          child: ElevatedButton.icon(
+                            onPressed: (_readOnly ||
+                                    (!hicVeriYok && yeniFarkSayisi > 0))
+                                ? null
+                                : () => setState(
+                                    () => _pulseKontrolOnaylandi = true),
+                            icon: const Icon(Icons.check_circle_outline),
+                            label: const Text(
+                                'Pulse\'u kontrol ettim, veriler doğru'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: yeniFarkSayisi > 0
+                                  ? Colors.grey[400]
+                                  : Colors.orange[700],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      }),
               ),
               const SizedBox(height: 32),
             ],
@@ -6436,11 +6131,14 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         _myDominosYuklendi = true;
         _myDomOkundu = true;
         _okumaMesaji = '✓ My Dominos verileri okundu';
+        _degisiklikVar = true;
+        if (_duzenlemeAcik) _gercekDegisiklikVar = true;
         for (final entry in yeniOkunan.entries) {
           _myDomKiyasCtrl[entry.key]!.text =
               _formatTL(entry.value).replaceAll(' ₺', '');
         }
       });
+      _otomatikKaydetBaslat();
 
       Future.delayed(const Duration(seconds: 4), () {
         if (mounted) setState(() => _okumaMesaji = '');
@@ -8260,9 +7958,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       }
       if (myDomKiyas.isNotEmpty) _myDominosYuklendi = true;
       _pulseKontrolOnaylandi = data['pulseKontrolOnaylandi'] == true;
-      if (_pulseKiyasCtrl.values.any((c) => c.text.isNotEmpty))
-        _pulseOkundu = true;
-      if (_myDominosOkunan.isNotEmpty) _myDomOkundu = true;
+      _pulseOkundu = data['pulseResmiOkundu'] == true;
+      _myDomOkundu = data['myDomResmiOkundu'] == true;
       // Online ödemeler
       final onlineList = (data['onlineOdemeler'] as List?)?.cast<Map>() ?? [];
       for (var o in _onlineOdemeler) {
@@ -9277,6 +8974,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               .map((e) => MapEntry(e.key, e.value.text)),
         ),
         'pulseKontrolOnaylandi': _pulseKontrolOnaylandi,
+        'pulseResmiOkundu': _pulseOkundu,
+        'myDomResmiOkundu': _myDomOkundu,
         'harcamalar': _harcamalar
             .map(
               (h) => {
