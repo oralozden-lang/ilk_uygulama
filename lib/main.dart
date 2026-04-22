@@ -3111,6 +3111,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   bool _myDomOkundu = false; // MyDom başarıyla okundu mu
   bool _pulseKontrolOnaylandi = false; // "Pulse kontrol edildi" onayı
   final Set<String> _acikSatirlar = {}; // ✏ ile açılan eşleşen satırlar
+  double _pulseBankaParasi = 0; // Pulse sayfasındaki Banka Parası
+  String? _focustaKiSatir; // Şu an focus'ta olan satır key'i — mod değiştirme
+  final Map<String, String> _satirModu =
+      {}; // Her satırın mevcut modu: 'bos','sol','eslesme','fark'
+  final Map<String, String> _eskiPulseDegler =
+      {}; // İptal için eski Pulse değerleri
+  final Map<String, String> _eskiMyDomDegler =
+      {}; // İptal için eski MyDom değerleri
   String _okumaMesaji = ''; // Alt banttaki mesaj
   final Map<String, TextEditingController> _pulseKiyasCtrl =
       {}; // Pulse manuel giriş
@@ -3160,7 +3168,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   bool _internetVar = true; // İnternet bağlantısı durumu
   Timer? _internetTimer;
   Timer? _arkaPlanTimer; // Arka planda geçen süre
-  Timer? _otomatikKaydetTimer; // Debounce timer
+  Timer? _idleTimer; // Kullanıcı dokunmayı bırakınca kaydet (idle)
   bool _otomatikKaydediliyor = false; // Otomatik kayıt devam ediyor mu
   String _appBarMesaj = ''; // AppBar'da gösterilecek mesaj
   Timer? _appBarMesajTimer; // AppBar mesajı için timer
@@ -3191,9 +3199,20 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   void initState() {
     super.initState();
     _tabController = TabController(length: 6, vsync: this);
+
     // Pulse/MyDom sekmesine geçince rebuild et — POS değerleri güncellensin
+    int _sonTabIndex = 0;
     _tabController.addListener(() {
-      if (mounted && !_tabController.indexIsChanging) setState(() {});
+      if (!mounted) return;
+      // Sadece gerçek sekme değişiminde tetikle
+      if (_tabController.indexIsChanging) {
+        if (_tabController.index != _sonTabIndex) {
+          _sonTabIndex = _tabController.index;
+          setState(() {});
+          // Sekme değişince bekleyen kayıt varsa kaydet
+          if (_degisiklikVar) _anindaKaydet();
+        }
+      }
     });
     _banknotlariYukle();
     _giderTurleriYukle();
@@ -3247,7 +3266,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             _degisiklikVar = true;
             if (_duzenlemeAcik) _gercekDegisiklikVar = true;
           });
-          _otomatikKaydetBaslat();
           _kilitAl();
         }
       });
@@ -3479,15 +3497,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused) {
-      // Arka plana atıldı — bekleyen değişiklik varsa hemen kaydet
-      if (_degisiklikVar || (_otomatikKaydetTimer?.isActive == true)) {
-        _otomatikKaydetTimer?.cancel();
-        final tarihKey = _tarihKey(_secilenTarih);
+      // Arka plana atıldı — idle timer iptal et, hemen kaydet
+      _idleTimer?.cancel();
+      if (_degisiklikVar) {
         FirebaseFirestore.instance
             .collection('subeler')
             .doc(widget.subeKodu)
             .collection('gunluk')
-            .doc(tarihKey)
+            .doc(_tarihKey(_secilenTarih))
             .set(_otomatikKayitVerisi(), SetOptions(merge: true))
             .then((_) {
           if (mounted) setState(() => _degisiklikVar = false);
@@ -3623,40 +3640,52 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   }
 
   // ── Otomatik kaydet (debounce 3 sn) ────────────────────────────────────────
-  void _otomatikKaydetBaslat() {
-    // readOnly modda otomatik kayıt çalışmasın
-    if (_readOnly) return;
-    _otomatikKaydetTimer?.cancel();
-    // 3 sn debounce başlayınca hemen "Kaydediliyor..." göster
+  // Kaydet — direkt, timer yok
+  // Tetikleyiciler: odak kaybı, sekme değişimi, lifecycle paused, sayfa pop
+  Future<void> _otomatikKaydet() async {
+    if (_readOnly || !_degisiklikVar || _otomatikKaydediliyor) return;
+    if (!mounted) return;
+    setState(() => _otomatikKaydediliyor = true);
     if (mounted) _appBarMesajGoster('⏳ Kaydediliyor...');
-    _otomatikKaydetTimer = Timer(const Duration(seconds: 3), () async {
-      if (!mounted || _otomatikKaydediliyor) return;
-      setState(() => _otomatikKaydediliyor = true);
-      try {
-        final tarihKey = _tarihKey(_secilenTarih);
-        final data = _otomatikKayitVerisi();
-        await FirebaseFirestore.instance
-            .collection('subeler')
-            .doc(widget.subeKodu)
-            .collection('gunluk')
-            .doc(tarihKey)
-            .set(data, SetOptions(merge: true));
-        if (mounted) {
-          setState(() => _degisiklikVar = false);
-          _appBarMesajGoster('✓ Otomatik Kaydedildi');
-          await _kilitBirak();
-        }
-      } catch (e) {
-        if (mounted) {
-          _appBarMesajGoster('✗ Kayıt Hatası: $e');
-          // Hata detayını konsola da yaz
-          // ignore: avoid_print
-          print('OTOMATIK KAYIT HATASI: $e');
-        }
-      } finally {
-        if (mounted) setState(() => _otomatikKaydediliyor = false);
+    try {
+      final tarihKey = _tarihKey(_secilenTarih);
+      final data = _otomatikKayitVerisi();
+      await FirebaseFirestore.instance
+          .collection('subeler')
+          .doc(widget.subeKodu)
+          .collection('gunluk')
+          .doc(tarihKey)
+          .set(data, SetOptions(merge: true));
+      if (mounted) {
+        setState(() => _degisiklikVar = false);
+        _appBarMesajGoster('✓ Kaydedildi');
+        await _kilitBirak();
       }
+    } catch (e) {
+      if (mounted) {
+        _appBarMesajGoster('✗ Kayıt Hatası: $e');
+        // ignore: avoid_print
+        print('KAYIT HATASI: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _otomatikKaydediliyor = false);
+    }
+  }
+
+  // Geriye dönük uyumluluk — eski _otomatikKaydetBaslat çağrıları için
+  // Veri değişince çağrıl — idle timer başlat (60sn sonra kaydet)
+  void _otomatikKaydetBaslat() {
+    if (_readOnly) return;
+    _idleTimer?.cancel();
+    _idleTimer = Timer(const Duration(seconds: 60), () {
+      if (mounted && _degisiklikVar) _otomatikKaydet();
     });
+  }
+
+  // Anında kaydet — sekme/lifecycle/gün değişimi gibi kritik anlarda
+  void _anindaKaydet() {
+    _idleTimer?.cancel();
+    _otomatikKaydet();
   }
 
   // Otomatik kayıt için veri — zincirleme gerektirmez
@@ -3719,6 +3748,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           )
           .toList(),
       'toplamHarcama': _toplamHarcama,
+      'bankaParasi': _bankaParasi,
       'banknotlar': {
         for (var b in _banknotlar)
           b.toString(): _parseInt(_banknotCtrl[b]!.text),
@@ -4333,9 +4363,12 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     // Online ödemeler
     for (final o in _onlineOdemeler) {
       final ad = o['ad'] as String;
-      final myDomVal = _myDominosOkunan.containsKey(ad)
+      // MyDominos okunmamışsa 0 kullan — sadece okunmuş veri karşılaştırılsın
+      final myDomVal = _myDomOkundu && _myDominosOkunan.containsKey(ad)
           ? _myDominosOkunan[ad]!
-          : _parseDouble((o['ctrl'] as TextEditingController).text);
+          : _myDomOkundu
+              ? _parseDouble((o['ctrl'] as TextEditingController).text)
+              : 0.0;
       tumKalemler.add({
         'tip': 'online',
         'ad': ad,
@@ -4370,26 +4403,25 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
 
     // Banka Parası = Brüt Satış - Sonuç toplamları (effectiveMyDom değerleri)
     // Brüt Satış kalemi listedeyse çıkarma hesabına dahil etme — zaten brutSatisProgram olarak kullanılıyor
-    double toplamSonuc = 0;
+    // Banka Parası = Brüt Satış (Pulse) - Girilen Pulse değerlerinin toplamı
+    double toplamPulse = 0;
     for (final k in tumKalemler) {
       final pulseKey = k['pulseKey'] as String;
-      final tipBanka = k['tip'] as String;
-      // Brüt Satış kalemini atla — brutSatisProgram zaten bu değer
       final adLowerBanka = (k['ad'] as String).toLowerCase();
       if (adLowerBanka.contains('brüt') || adLowerBanka.contains('brut'))
         continue;
-      final isPosOrYemekBanka = tipBanka == 'pos' || tipBanka == 'yemek';
-      final myDomValBanka =
-          tipBanka == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-      final myDomCtrl = _myDomKiyasCtrl[pulseKey];
-      final effectiveMyDom = isPosOrYemekBanka
-          ? myDomValBanka
-          : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
-              ? _parseDouble(myDomCtrl.text)
-              : myDomValBanka);
-      toplamSonuc += effectiveMyDom;
+      final pulseCtrlBanka = _pulseKiyasCtrl[pulseKey];
+      if (pulseCtrlBanka != null && pulseCtrlBanka.text.isNotEmpty) {
+        toplamPulse += _parseDouble(pulseCtrlBanka.text);
+      }
     }
-    final bankaParasi = brutSatisProgram - toplamSonuc;
+    final bankaParasi = brutSatisProgram - toplamPulse;
+    // Günlük Kasa için banka parasını güncelle
+    if (_pulseBankaParasi != bankaParasi) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _pulseBankaParasi = bankaParasi);
+      });
+    }
 
     return Stack(
       children: [
@@ -4400,51 +4432,81 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             children: [
               // Pulse / MyDom okuma butonları
               Row(children: [
+                // MyDominos solda
                 Expanded(
-                    child: ElevatedButton.icon(
-                  onPressed:
-                      _readOnly || _myDominosOkunuyor ? null : _pulseResmiOku,
-                  icon: Icon(
-                      _pulseOkundu ? Icons.check_circle : Icons.camera_alt,
-                      size: 15),
-                  label: Text(
-                      _pulseOkunuyor
-                          ? 'Okunuyor...'
-                          : _pulseOkundu
-                              ? 'Pulse ✓'
-                              : 'Pulse Resmi',
-                      style: const TextStyle(fontSize: 12)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _pulseOkundu
-                        ? Colors.green[700]
-                        : const Color(0xFF0288D1),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                )),
+                    child: _myDominosOkunuyor
+                        ? ElevatedButton.icon(
+                            onPressed: () => setState(() {
+                              _myDomIptalEdildi = true;
+                              _myDominosOkunuyor = false;
+                            }),
+                            icon: const Icon(Icons.cancel, size: 15),
+                            label: const Text('İptal',
+                                style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red[700],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          )
+                        : ElevatedButton.icon(
+                            onPressed: _readOnly || _pulseOkunuyor
+                                ? null
+                                : _myDominosResmiOku,
+                            icon: Icon(
+                                _myDomOkundu
+                                    ? Icons.check_circle
+                                    : Icons.camera_alt,
+                                size: 15),
+                            label: Text(
+                                _myDomOkundu ? 'My Dom. ✓' : 'My Dominos',
+                                style: const TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _myDomOkundu
+                                  ? Colors.green[700]
+                                  : const Color(0xFFFF8F00),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          )),
                 const SizedBox(width: 8),
+                // Pulse Resmi sağda
                 Expanded(
-                    child: ElevatedButton.icon(
-                  onPressed:
-                      _readOnly || _pulseOkunuyor ? null : _myDominosResmiOku,
-                  icon: Icon(
-                      _myDomOkundu ? Icons.check_circle : Icons.camera_alt,
-                      size: 15),
-                  label: Text(
-                      _myDominosOkunuyor
-                          ? 'Okunuyor...'
-                          : _myDomOkundu
-                              ? 'My Dom. ✓'
-                              : 'My Dominos',
-                      style: const TextStyle(fontSize: 12)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _myDomOkundu
-                        ? Colors.green[700]
-                        : const Color(0xFFFF8F00),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                )),
+                    child: _pulseOkunuyor
+                        ? ElevatedButton.icon(
+                            onPressed: () => setState(() {
+                              _pulseIptalEdildi = true;
+                              _pulseOkunuyor = false;
+                            }),
+                            icon: const Icon(Icons.cancel, size: 15),
+                            label: const Text('İptal',
+                                style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red[700],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          )
+                        : ElevatedButton.icon(
+                            onPressed: _readOnly || _myDominosOkunuyor
+                                ? null
+                                : _pulseResmiOku,
+                            icon: Icon(
+                                _pulseOkundu
+                                    ? Icons.check_circle
+                                    : Icons.camera_alt,
+                                size: 15),
+                            label: Text(
+                                _pulseOkundu ? 'Pulse ✓' : 'Pulse Resmi',
+                                style: const TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _pulseOkundu
+                                  ? Colors.green[700]
+                                  : const Color(0xFF0288D1),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          )),
               ]),
               const SizedBox(height: 10),
 
@@ -4511,7 +4573,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                               _degisiklikVar = true;
                               if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                             }
-                            _otomatikKaydetBaslat();
                           },
                         ),
                       ]),
@@ -4576,717 +4637,567 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
 
               // ── Kıyaslama listesi — sabit sıra ──
               Builder(builder: (ctx) {
-                // Kalemler: brüt satış hariç, sabit pulseSira sırası
                 final gorunenler = tumKalemler.where((k) {
                   final adL = (k['ad'] as String).toLowerCase();
                   return !adL.contains('brüt') && !adL.contains('brut');
                 }).toList();
 
-                Widget pulseInputW(TextEditingController ctrl,
-                    {bool enabled = true}) {
-                  return TextField(
-                    controller: ctrl,
-                    enabled: !_readOnly && enabled,
-                    textAlign: TextAlign.right,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [BinAraciFormatter()],
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: enabled
-                            ? const Color(0xFF1D4ED8)
-                            : Colors.grey[500]),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 8),
-                      hintText: '0,00',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          borderSide: BorderSide(
-                              color: enabled
-                                  ? const Color(0xFF93C5FD)
-                                  : Colors.grey[300]!)),
-                      enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          borderSide: BorderSide(
-                              color: enabled
-                                  ? const Color(0xFF93C5FD)
-                                  : Colors.grey[300]!,
-                              width: 1.5)),
-                      focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          borderSide: const BorderSide(
-                              color: Color(0xFF1D4ED8), width: 1.5)),
-                      filled: true,
-                      fillColor:
-                          enabled ? const Color(0xFFEFF6FF) : Colors.grey[100],
-                    ),
-                    onChanged: (_) {
-                      setState(() {});
-                      if (!_yukleniyor) _degisiklikVar = true;
-                    },
-                  );
-                }
-
-                Widget myDomInputW(TextEditingController? ctrl,
-                    {bool enabled = true}) {
-                  return TextField(
-                    controller: ctrl ?? TextEditingController(),
-                    enabled: !_readOnly && enabled,
-                    textAlign: TextAlign.right,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [BinAraciFormatter()],
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: enabled
-                            ? const Color(0xFFC2410C)
-                            : Colors.grey[500]),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 8),
-                      hintText: '0,00',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          borderSide: BorderSide(
-                              color: enabled
-                                  ? const Color(0xFFFDBA74)
-                                  : Colors.grey[300]!)),
-                      enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          borderSide: BorderSide(
-                              color: enabled
-                                  ? const Color(0xFFFDBA74)
-                                  : Colors.grey[300]!,
-                              width: 1.5)),
-                      focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          borderSide: const BorderSide(
-                              color: Color(0xFFC2410C), width: 1.5)),
-                      filled: true,
-                      fillColor:
-                          enabled ? const Color(0xFFFFF7ED) : Colors.grey[100],
-                    ),
-                    onChanged: (_) {
-                      setState(() {});
-                      if (!_yukleniyor) _degisiklikVar = true;
-                    },
-                  );
-                }
-
-                Widget _satir(Map<String, dynamic> k) {
-                  final ad = k['ad'] as String;
-                  final pulseKey = k['pulseKey'] as String;
-                  final pulseSira = k['pulseSira'] as int;
-                  final tip = k['tip'] as String;
-                  final myDomVal =
-                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-                  final isPosOrYemek = tip == 'pos' ||
-                      tip == 'yemek' ||
-                      (tip == 'pulseKalemi' && myDomVal > 0);
-                  final pulseCtrl =
-                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
-                  final myDomCtrl = _myDomKiyasCtrl[pulseKey];
-                  final effectiveMyDom = isPosOrYemek
-                      ? myDomVal
-                      : (myDomCtrl != null && myDomCtrl.text.isNotEmpty
-                          ? _parseDouble(myDomCtrl.text)
-                          : myDomVal);
-                  final pulseVal = _parseDouble(pulseCtrl.text);
-                  final pulseBos =
-                      pulseCtrl.text.isEmpty && effectiveMyDom == 0;
-                  final fark = effectiveMyDom - pulseVal;
-                  final eslesme = !pulseBos && fark.abs() < 0.01;
-                  final acik = _acikSatirlar.contains(pulseKey);
-                  final seritRenk = pulseBos
-                      ? const Color(0xFFE2E8F0)
-                      : eslesme
-                          ? const Color(0xFF22C55E)
-                          : const Color(0xFFEF4444);
-
-                  // GİRİLMEMİŞ
-                  if (pulseBos) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 3),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border(
-                              left: BorderSide(color: seritRenk, width: 4))),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 8),
-                        child: Row(children: [
-                          Expanded(
-                              child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                Text('$pulseSira. $ad',
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF94A3B8))),
-                                if (effectiveMyDom > 0)
-                                  Text(
-                                      isPosOrYemek
-                                          ? 'Program: ${_formatTL(effectiveMyDom)}'
-                                          : 'MyDom: ${_formatTL(effectiveMyDom)}',
-                                      style: const TextStyle(
-                                          fontSize: 9,
-                                          color: Color(0xFFCBD5E1))),
-                              ])),
-                          SizedBox(width: 90, child: pulseInputW(pulseCtrl)),
-                          const SizedBox(width: 8),
-                          const Text('—',
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  color: Color(0xFFCBD5E1),
-                                  fontWeight: FontWeight.w700)),
-                        ]),
-                      ),
-                    );
-                  }
-
-                  // FARK VAR
-                  if (!eslesme) {
-                    final ekle = fark > 0;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 5),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border(
-                              left: BorderSide(color: seritRenk, width: 4))),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 4),
-                              child: Row(children: [
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      Text('$pulseSira. $ad',
-                                          style: const TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
-                                              color: Color(0xFF1E293B))),
-                                      Text(
-                                          isPosOrYemek
-                                              ? (tip == 'pos'
-                                                  ? 'POS'
-                                                  : 'Yemek Kartı')
-                                              : 'Online',
-                                          style: const TextStyle(
-                                              fontSize: 9,
-                                              color: Color(0xFF94A3B8))),
-                                    ])),
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 7, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: ekle
-                                        ? const Color(0xFFF0FDF4)
-                                        : const Color(0xFFFEF2F2),
-                                    borderRadius: BorderRadius.circular(5),
-                                    border: Border.all(
-                                        color: ekle
-                                            ? const Color(0xFF86EFAC)
-                                            : const Color(0xFFFCA5A5)),
-                                  ),
-                                  child: Text(
-                                    ekle
-                                        ? '+ ${_formatTL(fark).replaceAll(' ₺', '')} ekle'
-                                        : '− ${_formatTL(fark.abs()).replaceAll(' ₺', '')} çıkar',
-                                    style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700,
-                                        color: ekle
-                                            ? const Color(0xFF15803D)
-                                            : const Color(0xFFDC2626)),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                GestureDetector(
-                                  onTap: _readOnly
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            _pulseKiyasCtrl.putIfAbsent(
-                                                pulseKey,
-                                                () => TextEditingController());
-                                            _pulseKiyasCtrl[pulseKey]!.text =
-                                                effectiveMyDom > 0
-                                                    ? _formatTL(effectiveMyDom)
-                                                        .replaceAll(' ₺', '')
-                                                    : '';
-                                            _degisiklikVar = true;
-                                            if (_duzenlemeAcik)
-                                              _gercekDegisiklikVar = true;
-                                          });
-                                          _otomatikKaydetBaslat();
-                                        },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 7, vertical: 3),
-                                    decoration: BoxDecoration(
-                                        color: const Color(0xFFF0F9FF),
-                                        borderRadius: BorderRadius.circular(5),
-                                        border: Border.all(
-                                            color: const Color(0xFF0288D1))),
-                                    child: const Text('Eşleştir ✓',
-                                        style: TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w700,
-                                            color: Color(0xFF0288D1))),
-                                  ),
-                                ),
-                              ]),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                              child: Row(children: [
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      const Text('PULSE — düzenle',
-                                          style: TextStyle(
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.w700,
-                                              color: Color(0xFF1D4ED8))),
-                                      const SizedBox(height: 2),
-                                      pulseInputW(pulseCtrl),
-                                    ])),
-                                const Padding(
-                                    padding:
-                                        EdgeInsets.symmetric(horizontal: 8),
-                                    child: Text('↔',
-                                        style: TextStyle(
-                                            fontSize: 14,
-                                            color: Color(0xFF94A3B8)))),
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      Text(
-                                          isPosOrYemek
-                                              ? 'PROGRAM — sabit'
-                                              : 'MYDOM — düzenle',
-                                          style: TextStyle(
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.w700,
-                                              color: isPosOrYemek
-                                                  ? const Color(0xFF64748B)
-                                                  : const Color(0xFFC2410C))),
-                                      const SizedBox(height: 2),
-                                      isPosOrYemek
-                                          ? Container(
-                                              width: double.infinity,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 8),
-                                              decoration: BoxDecoration(
-                                                  color: Colors.grey[100],
-                                                  borderRadius:
-                                                      BorderRadius.circular(6),
-                                                  border: Border.all(
-                                                      color:
-                                                          Colors.grey[300]!)),
-                                              child: Text(
-                                                  effectiveMyDom > 0
-                                                      ? _formatTL(
-                                                              effectiveMyDom)
-                                                          .replaceAll(' ₺', '')
-                                                      : '0,00',
-                                                  textAlign: TextAlign.right,
-                                                  style: TextStyle(
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                      color: Colors.grey[600])),
-                                            )
-                                          : myDomInputW(myDomCtrl),
-                                    ])),
-                              ]),
-                            ),
-                            if (isPosOrYemek)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.only(left: 14, bottom: 8),
-                                child: Text(
-                                  tip == 'pos'
-                                      ? '⚠ Kredi kartını POS & Y. Kartı sekmesinden düzelt'
-                                      : '⚠ Yemek kartını POS & Y. Kartı sekmesinden düzelt',
-                                  style: const TextStyle(
-                                      fontSize: 9,
-                                      color: Color(0xFF94A3B8),
-                                      fontStyle: FontStyle.italic),
-                                ),
-                              ),
-                          ]),
-                    );
-                  }
-
-                  // EŞLEŞİYOR — açılmış
-                  if (acik) {
-                    // Düzenleme için geçici değerleri sakla (ilk açılışta)
-                    final eskiPulseVal = pulseVal;
-                    final eskiMyDomVal = myDomCtrl?.text ?? '';
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 5),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          border: const Border(
-                              left: BorderSide(
-                                  color: Color(0xFFF59E0B), width: 4))),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 7, 10, 4),
-                              child: Row(children: [
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      Text('$pulseSira. $ad',
-                                          style: const TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700)),
-                                      const Text('Düzenleme modu',
-                                          style: TextStyle(
-                                              fontSize: 9,
-                                              color: Color(0xFFF59E0B))),
-                                    ])),
-                                // İptal butonu
-                                GestureDetector(
-                                  onTap: () => setState(
-                                      () => _acikSatirlar.remove(pulseKey)),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                        color: Colors.grey[100],
-                                        borderRadius: BorderRadius.circular(5),
-                                        border: Border.all(
-                                            color: Colors.grey[300]!)),
-                                    child: const Text('İptal',
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            color: Color(0xFF64748B))),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                // Kaydet butonu
-                                GestureDetector(
-                                  onTap: _readOnly
-                                      ? null
-                                      : () {
-                                          setState(() =>
-                                              _acikSatirlar.remove(pulseKey));
-                                          if (!_yukleniyor) {
-                                            setState(() {
-                                              _degisiklikVar = true;
-                                              if (_duzenlemeAcik)
-                                                _gercekDegisiklikVar = true;
-                                            });
-                                          }
-                                          _otomatikKaydetBaslat();
-                                        },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                        color: const Color(0xFF0288D1),
-                                        borderRadius: BorderRadius.circular(5)),
-                                    child: const Text('Kaydet',
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w700)),
-                                  ),
-                                ),
-                              ]),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                              child: Row(children: [
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      const Text('PULSE — düzenle',
-                                          style: TextStyle(
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.w700,
-                                              color: Color(0xFF1D4ED8))),
-                                      const SizedBox(height: 2),
-                                      pulseInputW(pulseCtrl),
-                                    ])),
-                                const Padding(
-                                    padding:
-                                        EdgeInsets.symmetric(horizontal: 8),
-                                    child: Text('↔',
-                                        style: TextStyle(
-                                            fontSize: 14,
-                                            color: Color(0xFF94A3B8)))),
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      Text(
-                                          isPosOrYemek
-                                              ? 'PROGRAM — sabit'
-                                              : 'MYDOM — düzenle',
-                                          style: TextStyle(
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.w700,
-                                              color: isPosOrYemek
-                                                  ? const Color(0xFF64748B)
-                                                  : const Color(0xFFC2410C))),
-                                      const SizedBox(height: 2),
-                                      isPosOrYemek
-                                          ? Container(
-                                              width: double.infinity,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 8),
-                                              decoration: BoxDecoration(
-                                                  color: Colors.grey[100],
-                                                  borderRadius:
-                                                      BorderRadius.circular(6),
-                                                  border: Border.all(
-                                                      color:
-                                                          Colors.grey[300]!)),
-                                              child: Text(
-                                                  effectiveMyDom > 0
-                                                      ? _formatTL(
-                                                              effectiveMyDom)
-                                                          .replaceAll(' ₺', '')
-                                                      : '0,00',
-                                                  textAlign: TextAlign.right,
-                                                  style: TextStyle(
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                      color: Colors.grey[600])),
-                                            )
-                                          : myDomInputW(myDomCtrl),
-                                    ])),
-                              ]),
-                            ),
-                            if (isPosOrYemek)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.only(left: 14, bottom: 8),
-                                child: Text(
-                                  tip == 'pos'
-                                      ? '⚠ Kredi kartını POS & Y. Kartı sekmesinden düzelt'
-                                      : '⚠ Yemek kartını POS & Y. Kartı sekmesinden düzelt',
-                                  style: const TextStyle(
-                                      fontSize: 9,
-                                      color: Color(0xFF94A3B8),
-                                      fontStyle: FontStyle.italic),
-                                ),
-                              ),
-                          ]),
-                    );
-                  }
-
-                  // EŞLEŞİYOR — kompakt
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 3),
-                    decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border(
-                            left: BorderSide(color: seritRenk, width: 4))),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 7),
-                      child: Row(children: [
-                        Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              Text('$pulseSira. $ad',
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF1E293B))),
-                              Text(
-                                  isPosOrYemek
-                                      ? 'Program: ${_formatTL(effectiveMyDom)}'
-                                      : 'MyDom: ${_formatTL(effectiveMyDom)}',
-                                  style: const TextStyle(
-                                      fontSize: 9, color: Color(0xFF64748B))),
-                            ])),
-                        SizedBox(
-                          width: 90,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 7),
-                            decoration: BoxDecoration(
-                                color: const Color(0xFFF0FDF4),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                    color: const Color(0xFF86EFAC),
-                                    width: 1.5)),
-                            child: Text(
-                                _formatTL(pulseVal).replaceAll(' ₺', ''),
-                                textAlign: TextAlign.right,
-                                style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF15803D))),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const Text('✓',
-                            style: TextStyle(
-                                fontSize: 14,
-                                color: Color(0xFF16A34A),
-                                fontWeight: FontWeight.w700)),
-                        const SizedBox(width: 4),
-                        GestureDetector(
-                          onTap: () =>
-                              setState(() => _acikSatirlar.add(pulseKey)),
-                          child: Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                                color: const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(6),
-                                border:
-                                    Border.all(color: const Color(0xFFE2E8F0))),
-                            child: const Icon(Icons.edit,
-                                size: 13, color: Color(0xFF64748B)),
-                          ),
-                        ),
-                      ]),
-                    ),
-                  );
-                }
-
-                // Özet bar hesapla
-                int farkSayisi = 0, eslesiyorSayisi = 0, girilmemisSayisi = 0;
-                for (final k in gorunenler) {
-                  final pulseKey = k['pulseKey'] as String;
-                  final tip = k['tip'] as String;
-                  final myDomVal2 =
-                      tip == 'pos' ? _toplamPos : (k['myDomVal'] as double);
-                  final isPOY = tip == 'pos' ||
-                      tip == 'yemek' ||
-                      (tip == 'pulseKalemi' && myDomVal2 > 0);
-                  final pCtrl =
-                      _pulseKiyasCtrl[pulseKey] ?? TextEditingController();
-                  final mCtrl = _myDomKiyasCtrl[pulseKey];
-                  final effMD = isPOY
-                      ? myDomVal2
-                      : (mCtrl != null && mCtrl.text.isNotEmpty
-                          ? _parseDouble(mCtrl.text)
-                          : myDomVal2);
-                  final bos = pCtrl.text.isEmpty && effMD == 0;
-                  final f = effMD - _parseDouble(pCtrl.text);
-                  if (bos)
-                    girilmemisSayisi++;
-                  else if (f.abs() < 0.01)
-                    eslesiyorSayisi++;
-                  else
-                    farkSayisi++;
-                }
-
                 return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Özet bar
-                      Row(children: [
-                        if (farkSayisi > 0)
-                          Expanded(
-                              child: Container(
-                            margin: const EdgeInsets.only(right: 4),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                                color: const Color(0xFFFEF2F2),
-                                borderRadius: BorderRadius.circular(8),
-                                border:
-                                    Border.all(color: const Color(0xFFFCA5A5))),
-                            child: Column(children: [
-                              Text('$farkSayisi',
-                                  style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFFDC2626))),
-                              const Text('Fark var',
+                      // ── Tablo başlık ──
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(10),
+                              topRight: Radius.circular(10)),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        child: Row(children: [
+                          const Expanded(
+                              child: Text('Kalem',
                                   style: TextStyle(
-                                      fontSize: 9, color: Color(0xFFDC2626))),
-                            ]),
-                          )),
-                        if (eslesiyorSayisi > 0)
-                          Expanded(
-                              child: Container(
-                            margin: EdgeInsets.only(
-                                left: farkSayisi > 0 ? 4 : 0,
-                                right: girilmemisSayisi > 0 ? 4 : 0),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                                color: const Color(0xFFF0FDF4),
-                                borderRadius: BorderRadius.circular(8),
-                                border:
-                                    Border.all(color: const Color(0xFF86EFAC))),
-                            child: Column(children: [
-                              Text('$eslesiyorSayisi',
-                                  style: const TextStyle(
-                                      fontSize: 20,
+                                      fontSize: 9,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF16A34A))),
-                              const Text('Eşleşiyor',
+                                      color: Color(0xFF94A3B8)))),
+                          SizedBox(
+                              width: 76,
+                              child: Text('Prog/MyDom',
+                                  textAlign: TextAlign.right,
                                   style: TextStyle(
-                                      fontSize: 9, color: Color(0xFF15803D))),
-                            ]),
-                          )),
-                        if (girilmemisSayisi > 0)
-                          Expanded(
-                              child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAFC),
-                                borderRadius: BorderRadius.circular(8),
-                                border:
-                                    Border.all(color: const Color(0xFFE2E8F0))),
-                            child: Column(children: [
-                              Text('$girilmemisSayisi',
-                                  style: const TextStyle(
-                                      fontSize: 20,
+                                      fontSize: 9,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF64748B))),
-                              const Text('Girilmemiş',
+                                      color: Color(0xFF15803D)))),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                              width: 76,
+                              child: Text('Pulse',
+                                  textAlign: TextAlign.right,
                                   style: TextStyle(
-                                      fontSize: 9, color: Color(0xFF64748B))),
-                            ]),
-                          )),
-                      ]),
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF1D4ED8)))),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                              width: 48,
+                              child: Text('Fark',
+                                  textAlign: TextAlign.right,
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF94A3B8)))),
+                          const SizedBox(width: 28),
+                        ]),
+                      ),
+
+                      // ── Tablo satırları ──
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: const BorderRadius.only(
+                              bottomLeft: Radius.circular(10),
+                              bottomRight: Radius.circular(10)),
+                          border: const Border(
+                              left: BorderSide(color: Color(0xFFE2E8F0)),
+                              right: BorderSide(color: Color(0xFFE2E8F0)),
+                              bottom: BorderSide(color: Color(0xFFE2E8F0))),
+                        ),
+                        child: Column(children: [
+                          ...gorunenler.map((k) {
+                            final ad = k['ad'] as String;
+                            final pulseKey = k['pulseKey'] as String;
+                            final pulseSira = k['pulseSira'] as int;
+                            final tip = k['tip'] as String;
+                            final myDomVal = tip == 'pos'
+                                ? _toplamPos
+                                : (k['myDomVal'] as double);
+                            final isPosOrYemek = tip == 'pos' ||
+                                tip == 'yemek' ||
+                                (tip == 'pulseKalemi' && myDomVal > 0);
+                            final isOnline = tip == 'online';
+                            final pulseCtrl = _pulseKiyasCtrl[pulseKey] ??
+                                TextEditingController();
+                            final myDomCtrl = _myDomKiyasCtrl[pulseKey];
+
+                            // Prog/MyDom değeri
+                            final progVal = isPosOrYemek
+                                ? myDomVal
+                                : (myDomCtrl != null &&
+                                        myDomCtrl.text.isNotEmpty
+                                    ? _parseDouble(myDomCtrl.text)
+                                    : myDomVal);
+
+                            final pulseVal = _parseDouble(pulseCtrl.text);
+                            final progDolu =
+                                isPosOrYemek ? myDomVal > 0 : progVal > 0;
+                            final pulseDolu = pulseCtrl.text.isNotEmpty;
+                            final fark = progVal - pulseVal;
+                            // Eşleşme: her ikisi dolu ve fark yok
+                            final eslesme =
+                                pulseDolu && progDolu && fark.abs() < 0.01;
+                            // Fark: biri dolu biri farklı/boş → her durumda göster
+                            // (Pulse>0 prog=0, prog>0 pulse=0, her ikisi farklı)
+                            final farkVar = (pulseDolu || progDolu) && !eslesme;
+
+                            // Sol şerit rengi: eşleşme=yeşil, fark=kırmızı, boş=gri
+                            final seritRenk = eslesme
+                                ? const Color(0xFF22C55E)
+                                : farkVar
+                                    ? const Color(0xFFEF4444)
+                                    : const Color(
+                                        0xFFE2E8F0); // boş — bu satır artık kullanılmıyor
+                            return Container(
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  left: BorderSide(color: seritRenk, width: 3),
+                                  bottom: const BorderSide(
+                                      color: Color(0xFFF1F5F9), width: 0.5),
+                                ),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 7),
+                              child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    // Kalem adı
+                                    Expanded(
+                                        child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                          Text('$pulseSira. $ad',
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Color(0xFF1E293B)),
+                                              overflow: TextOverflow.ellipsis),
+                                          Text(
+                                            isPosOrYemek
+                                                ? (tip == 'pos'
+                                                    ? 'POS'
+                                                    : 'Yemek')
+                                                : 'Online',
+                                            style: const TextStyle(
+                                                fontSize: 8,
+                                                color: Color(0xFF94A3B8)),
+                                          ),
+                                        ])),
+                                    const SizedBox(width: 6),
+
+                                    // Prog/MyDom kolonu
+                                    SizedBox(
+                                      width: 76,
+                                      child: isPosOrYemek
+                                          // POS/Yemek: kilitli program değeri
+                                          ? Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: farkVar
+                                                    ? const Color(0xFFFEF2F2)
+                                                    : const Color(0xFFF0FDF4),
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                                border: Border.all(
+                                                    color: farkVar
+                                                        ? const Color(
+                                                            0xFFFCA5A5)
+                                                        : const Color(
+                                                            0xFF86EFAC)),
+                                              ),
+                                              child: Text(
+                                                myDomVal > 0
+                                                    ? _formatTL(myDomVal)
+                                                        .replaceAll(' ₺', '')
+                                                    : '—',
+                                                textAlign: TextAlign.right,
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: farkVar
+                                                        ? const Color(
+                                                            0xFFDC2626)
+                                                        : const Color(
+                                                            0xFF15803D)),
+                                              ),
+                                            )
+                                          // Online: düzenlenebilir MyDom kutusu
+                                          : TextField(
+                                              controller: myDomCtrl ??
+                                                  TextEditingController(),
+                                              enabled: !_readOnly,
+                                              textAlign: TextAlign.right,
+                                              keyboardType: const TextInputType
+                                                  .numberWithOptions(
+                                                  decimal: true),
+                                              inputFormatters: [
+                                                BinAraciFormatter()
+                                              ],
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Color(0xFF15803D)),
+                                              decoration: InputDecoration(
+                                                isDense: true,
+                                                contentPadding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 6),
+                                                hintText: '0,00',
+                                                hintStyle: const TextStyle(
+                                                    fontSize: 10,
+                                                    color: Color(0xFFCBD5E1)),
+                                                filled: true,
+                                                fillColor:
+                                                    const Color(0xFFF0FDF4),
+                                                border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            5),
+                                                    borderSide:
+                                                        const BorderSide(
+                                                            color: Color(
+                                                                0xFF86EFAC))),
+                                                enabledBorder: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            5),
+                                                    borderSide:
+                                                        const BorderSide(
+                                                            color: Color(
+                                                                0xFF86EFAC))),
+                                                focusedBorder:
+                                                    OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(5),
+                                                        borderSide:
+                                                            const BorderSide(
+                                                                color: Color(
+                                                                    0xFF15803D),
+                                                                width: 1.5)),
+                                              ),
+                                              onTap: () {
+                                                if (myDomCtrl != null &&
+                                                    !_eskiMyDomDegler
+                                                        .containsKey(
+                                                            pulseKey)) {
+                                                  _eskiMyDomDegler[pulseKey] =
+                                                      myDomCtrl.text;
+                                                }
+                                              },
+                                              onChanged: (_) {
+                                                setState(() {});
+                                                if (!_yukleniyor)
+                                                  _degisiklikVar = true;
+                                              },
+                                            ),
+                                    ),
+                                    const SizedBox(width: 6),
+
+                                    // Pulse kolonu
+                                    SizedBox(
+                                        width: 76,
+                                        child: TextField(
+                                          controller: pulseCtrl,
+                                          enabled: !_readOnly,
+                                          textAlign: TextAlign.right,
+                                          keyboardType: const TextInputType
+                                              .numberWithOptions(decimal: true),
+                                          inputFormatters: [
+                                            BinAraciFormatter()
+                                          ],
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: eslesme
+                                                  ? const Color(0xFF15803D)
+                                                  : farkVar
+                                                      ? const Color(0xFFDC2626)
+                                                      : const Color(
+                                                          0xFF1D4ED8)),
+                                          decoration: InputDecoration(
+                                            isDense: true,
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                    horizontal: 6, vertical: 6),
+                                            hintText: '0,00',
+                                            hintStyle: const TextStyle(
+                                                fontSize: 10,
+                                                color: Color(0xFFCBD5E1)),
+                                            filled: true,
+                                            fillColor: eslesme
+                                                ? const Color(0xFFF0FDF4)
+                                                : farkVar
+                                                    ? const Color(0xFFFEF2F2)
+                                                    : const Color(0xFFEFF6FF),
+                                            border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                                borderSide: BorderSide(
+                                                    color: eslesme
+                                                        ? const Color(
+                                                            0xFF86EFAC)
+                                                        : farkVar
+                                                            ? const Color(
+                                                                0xFFFCA5A5)
+                                                            : const Color(
+                                                                0xFF93C5FD))),
+                                            enabledBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                                borderSide: BorderSide(
+                                                    color: eslesme
+                                                        ? const Color(
+                                                            0xFF86EFAC)
+                                                        : farkVar
+                                                            ? const Color(
+                                                                0xFFFCA5A5)
+                                                            : const Color(
+                                                                0xFF93C5FD))),
+                                            focusedBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                                borderSide: const BorderSide(
+                                                    color: Color(0xFF1D4ED8),
+                                                    width: 1.5)),
+                                          ),
+                                          onTap: () {
+                                            if (!_eskiPulseDegler
+                                                .containsKey(pulseKey)) {
+                                              _eskiPulseDegler[pulseKey] =
+                                                  pulseCtrl.text;
+                                            }
+                                          },
+                                          onChanged: (_) {
+                                            setState(() {});
+                                            if (!_yukleniyor)
+                                              _degisiklikVar = true;
+                                          },
+                                        )),
+                                    const SizedBox(width: 6),
+
+                                    // Fark kolonu
+                                    SizedBox(
+                                        width: 48,
+                                        child: eslesme
+                                            ? const Center(
+                                                child: Text('✓',
+                                                    style: TextStyle(
+                                                        fontSize: 16,
+                                                        color:
+                                                            Color(0xFF16A34A),
+                                                        fontWeight:
+                                                            FontWeight.w800)))
+                                            : farkVar
+                                                ? Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment.end,
+                                                    children: [
+                                                        Text(
+                                                          fark > 0
+                                                              ? '+${_formatTL(fark).replaceAll(' ₺', '')}'
+                                                              : '−${_formatTL(fark.abs()).replaceAll(' ₺', '')}',
+                                                          style: TextStyle(
+                                                              fontSize: 10,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              color: fark > 0
+                                                                  ? const Color(
+                                                                      0xFF15803D)
+                                                                  : const Color(
+                                                                      0xFFDC2626)),
+                                                          textAlign:
+                                                              TextAlign.right,
+                                                        ),
+                                                        Text(
+                                                            fark > 0
+                                                                ? 'ekle'
+                                                                : 'çıkar',
+                                                            style: const TextStyle(
+                                                                fontSize: 7,
+                                                                color: Color(
+                                                                    0xFF94A3B8))),
+                                                      ])
+                                                : const Center(
+                                                    child: Text('—',
+                                                        style: TextStyle(
+                                                            fontSize: 12,
+                                                            color: Color(
+                                                                0xFFCBD5E1))))),
+                                    const SizedBox(width: 4),
+
+                                    // Eşleştir butonu (sadece fark varsa)
+                                    SizedBox(
+                                        width: 24,
+                                        child: farkVar
+                                            ? GestureDetector(
+                                                onTap: _readOnly
+                                                    ? null
+                                                    : () {
+                                                        final hedef =
+                                                            progVal > 0
+                                                                ? progVal
+                                                                : myDomVal;
+                                                        setState(() {
+                                                          _pulseKiyasCtrl
+                                                              .putIfAbsent(
+                                                                  pulseKey,
+                                                                  () =>
+                                                                      TextEditingController());
+                                                          _pulseKiyasCtrl[
+                                                                  pulseKey]!
+                                                              .text = hedef >
+                                                                  0
+                                                              ? _formatTL(hedef)
+                                                                  .replaceAll(
+                                                                      ' ₺', '')
+                                                              : '';
+                                                          _eskiPulseDegler
+                                                              .remove(pulseKey);
+                                                          _eskiMyDomDegler
+                                                              .remove(pulseKey);
+                                                          _degisiklikVar = true;
+                                                          if (_duzenlemeAcik)
+                                                            _gercekDegisiklikVar =
+                                                                true;
+                                                        });
+                                                        _anindaKaydet();
+                                                      },
+                                                child: Container(
+                                                  width: 24,
+                                                  height: 28,
+                                                  decoration: BoxDecoration(
+                                                    color:
+                                                        const Color(0xFF0288D1),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            5),
+                                                  ),
+                                                  child: const Icon(Icons.check,
+                                                      size: 14,
+                                                      color: Colors.white),
+                                                ),
+                                              )
+                                            : const SizedBox(width: 24)),
+                                  ]),
+                            );
+                          }).toList(),
+                        ]),
+                      ),
+
                       const SizedBox(height: 10),
-                      // Sabit sıralı liste
-                      ...gorunenler.map((k) => _satir(k)),
-                    ]);
-              }),
+
+                      const SizedBox(height: 10),
+
+                      // ── Özet bar ──
+                      Builder(builder: (ctx) {
+                        int farkSayisi = 0,
+                            eslesiyorSayisi = 0,
+                            girilmemisSayisi = 0;
+                        for (final k in gorunenler) {
+                          final pk = k['pulseKey'] as String;
+                          final t = k['tip'] as String;
+                          final mdv = t == 'pos'
+                              ? _toplamPos
+                              : (k['myDomVal'] as double);
+                          final ipoy = t == 'pos' ||
+                              t == 'yemek' ||
+                              (t == 'pulseKalemi' && mdv > 0);
+                          final pc =
+                              _pulseKiyasCtrl[pk] ?? TextEditingController();
+                          final mc = _myDomKiyasCtrl[pk];
+                          final prog = ipoy
+                              ? mdv
+                              : (mc != null && mc.text.isNotEmpty
+                                  ? _parseDouble(mc.text)
+                                  : mdv);
+                          final pulse = _parseDouble(pc.text);
+                          final progD = ipoy ? mdv > 0 : prog > 0;
+                          final pulseD = pc.text.isNotEmpty;
+                          final f = prog - pulse;
+                          if (!progD && !pulseD)
+                            girilmemisSayisi++;
+                          else if (progD && pulseD && f.abs() < 0.01)
+                            eslesiyorSayisi++;
+                          else
+                            farkSayisi++; // her iki yönde fark (pulse>0 prog=0 dahil)
+                        }
+                        return Row(children: [
+                          if (farkSayisi > 0)
+                            Expanded(
+                                child: Container(
+                              margin: const EdgeInsets.only(right: 4),
+                              padding: const EdgeInsets.symmetric(vertical: 7),
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF2F2),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: const Color(0xFFFCA5A5))),
+                              child: Column(children: [
+                                Text('$farkSayisi',
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFFDC2626))),
+                                const Text('Fark var',
+                                    style: TextStyle(
+                                        fontSize: 9, color: Color(0xFFDC2626))),
+                              ]),
+                            )),
+                          if (eslesiyorSayisi > 0)
+                            Expanded(
+                                child: Container(
+                              margin: EdgeInsets.only(
+                                  right: girilmemisSayisi > 0 ? 4 : 0,
+                                  left: farkSayisi > 0 ? 4 : 0),
+                              padding: const EdgeInsets.symmetric(vertical: 7),
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFFF0FDF4),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: const Color(0xFF86EFAC))),
+                              child: Column(children: [
+                                Text('$eslesiyorSayisi',
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF16A34A))),
+                                const Text('Eşleşiyor',
+                                    style: TextStyle(
+                                        fontSize: 9, color: Color(0xFF15803D))),
+                              ]),
+                            )),
+                          if (girilmemisSayisi > 0)
+                            Expanded(
+                                child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 7),
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: const Color(0xFFE2E8F0))),
+                              child: Column(children: [
+                                Text('$girilmemisSayisi',
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF64748B))),
+                                const Text('Girilmemiş',
+                                    style: TextStyle(
+                                        fontSize: 9, color: Color(0xFF64748B))),
+                              ]),
+                            )),
+                        ]);
+                      }),
+                    ]); // Column kapanışı
+              }), // Builder kapanışı
 
               const SizedBox(height: 8),
 
@@ -5316,12 +5227,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         ),
                       )
                     : Builder(builder: (bctx) {
-                        // Hiç veri girilmemiş mi kontrol et
-                        final hicVeriYok = !_pulseKiyasCtrl.values
-                                .any((c) => c.text.isNotEmpty) &&
-                            !_myDomKiyasCtrl.values
-                                .any((c) => c.text.isNotEmpty);
-                        // Fark sayısını yeni mantıkla hesapla (bos=girilmemis, saymaz)
+                        // Fark sayısını hesapla
                         int yeniFarkSayisi = 0;
                         for (final k in tumKalemler) {
                           final adL = (k['ad'] as String).toLowerCase();
@@ -5338,33 +5244,48 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           final pc =
                               _pulseKiyasCtrl[pk] ?? TextEditingController();
                           final mc = _myDomKiyasCtrl[pk];
-                          final eff = ipoy
+                          final sagDeger = ipoy
                               ? mdv
-                              : (mc != null && mc.text.isNotEmpty
-                                  ? _parseDouble(mc.text)
-                                  : mdv);
-                          final bos = pc.text.isEmpty && eff == 0;
-                          if (!bos &&
-                              (eff - _parseDouble(pc.text)).abs() >= 0.01)
-                            yeniFarkSayisi++;
+                              : _myDomOkundu
+                                  ? (mc != null && mc.text.isNotEmpty
+                                      ? _parseDouble(mc.text)
+                                      : mdv)
+                                  : 0.0;
+                          final solDeger = _parseDouble(pc.text);
+                          final solDoluF = pc.text.isNotEmpty;
+                          final sagDoluF = ipoy ? mdv > 0 : sagDeger > 0;
+                          // Her iki taraf da doluysa fark var mı bak
+                          // POS/Yemek: program=0 ise o gün kullanılmamış → saymaz
+                          // Her iki yönde fark say:
+                          // prog>0 pulse farklı/boş, pulse>0 prog=0
+                          final herBiriBos = !solDoluF && !sagDoluF;
+                          if (!herBiriBos) {
+                            final eslesF = solDoluF &&
+                                sagDoluF &&
+                                (sagDeger - solDeger).abs() < 0.01;
+                            if (!eslesF) yeniFarkSayisi++;
+                          }
                         }
+                        // Aktif: fark yok → onaylanabilir
+                        // Pasif: fark var → tüm farklar kapatılmalı
+                        final butonAktif = yeniFarkSayisi == 0 && !_readOnly;
                         return Tooltip(
                           message: yeniFarkSayisi > 0
-                              ? '$yeniFarkSayisi kalemde fark var, önce Pulse\'ta düzeltin'
+                              ? '$yeniFarkSayisi kalemde fark var — tüm farkları kapatın'
                               : '',
                           child: ElevatedButton.icon(
-                            onPressed: (_readOnly ||
-                                    (!hicVeriYok && yeniFarkSayisi > 0))
-                                ? null
-                                : () => setState(
-                                    () => _pulseKontrolOnaylandi = true),
+                            onPressed: butonAktif
+                                ? () => setState(
+                                    () => _pulseKontrolOnaylandi = true)
+                                : null,
                             icon: const Icon(Icons.check_circle_outline),
-                            label: const Text(
-                                'Pulse\'u kontrol ettim, veriler doğru'),
+                            label: Text(yeniFarkSayisi > 0
+                                ? '$yeniFarkSayisi kalemde fark var'
+                                : 'Pulse\'u kontrol ettim, veriler doğru'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: yeniFarkSayisi > 0
-                                  ? Colors.grey[400]
-                                  : Colors.orange[700],
+                              backgroundColor: butonAktif
+                                  ? Colors.orange[700]
+                                  : Colors.grey[400],
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
@@ -5376,10 +5297,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
             ],
           ),
         ),
-        // Okuma mesajı overlay — üstte
+        // Okuma mesajı overlay — altta
         if (_pulseOkunuyor || _myDominosOkunuyor || _okumaMesaji.isNotEmpty)
           Positioned(
-            top: 0,
+            bottom: 0,
             left: 0,
             right: 0,
             child: Container(
@@ -5412,7 +5333,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               ),
             ),
           ),
-      ],
+      ], // Stack children kapanışı
     );
   }
 
@@ -5828,7 +5749,7 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         _degisiklikVar = true;
         if (_duzenlemeAcik) _gercekDegisiklikVar = true;
       });
-      _otomatikKaydetBaslat();
+      _anindaKaydet();
 
       // Mesajı 4 saniye sonra temizle
       Future.delayed(const Duration(seconds: 4), () {
@@ -6138,7 +6059,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               _formatTL(entry.value).replaceAll(' ₺', '');
         }
       });
-      _otomatikKaydetBaslat();
+      _anindaKaydet();
 
       Future.delayed(const Duration(seconds: 4), () {
         if (mounted) setState(() => _okumaMesaji = '');
@@ -6252,6 +6173,18 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   @override
   void dispose() {
+    // Dispose öncesi idle timer iptal et, bekleyen kayıt varsa kaydet
+    _idleTimer?.cancel();
+    if (_degisiklikVar && !_readOnly) {
+      // dispose kayıt
+      FirebaseFirestore.instance
+          .collection('subeler')
+          .doc(widget.subeKodu)
+          .collection('gunluk')
+          .doc(_tarihKey(_secilenTarih))
+          .set(_otomatikKayitVerisi(), SetOptions(merge: true))
+          .catchError((_) {});
+    }
     _tabController.dispose();
     for (var c in _pulseKiyasCtrl.values) c.dispose();
     for (var c in _myDomKiyasCtrl.values) c.dispose();
@@ -6260,7 +6193,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     _kilitTimer?.cancel();
     _internetTimer?.cancel();
     _arkaPlanTimer?.cancel();
-    _otomatikKaydetTimer?.cancel();
+    // timer kaldırıldı
     _appBarMesajTimer?.cancel();
     _bekleyenTransferStream?.cancel();
     _scrollController.dispose();
@@ -6424,9 +6357,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       }
       return false;
     }
-    // Otomatik kayıt timerı aktifse hemen kaydet
-    if (_otomatikKaydetTimer?.isActive == true) {
-      _otomatikKaydetTimer?.cancel();
+    // Bekleyen değişiklik varsa hemen kaydet
+    if (_degisiklikVar) {
       try {
         final tarihKey = _tarihKey(_secilenTarih);
         await FirebaseFirestore.instance
@@ -8203,6 +8135,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       _myDomOkundu = false;
       _pulseKontrolOnaylandi = false;
       _okumaMesaji = '';
+      _pulseBankaParasi = 0;
 
       for (var h in _harcamalar) h.dispose();
       _harcamalar.clear();
@@ -8428,22 +8361,17 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   // Banka Parası = Brüt Satış - Sonuç toplamları (Pulse/MyDom sekmesinden)
   double get _bankaParasi {
+    // Pulse sayfasında hesaplanan banka parasını kullan (Pulse verileri bazlı)
+    if (_pulseBankaParasi != 0) return _pulseBankaParasi;
+    // Pulse verisi yoksa program değerlerinden hesapla
     final brutSatis = _parseDouble(_gunlukSatisCtrl.text);
     if (brutSatis <= 0) return 0;
-    double toplamSonuc = _toplamPos; // Kredi Kartı
-    // Yemek kartları
+    double toplamSonuc = _toplamPos;
     for (var c in _yemekKartlari) {
       toplamSonuc += _parseDouble(c.tutarCtrl.text);
     }
-    // Online — MyDom'dan geliyorsa MyDom, yoksa program
     for (var o in _onlineOdemeler) {
-      final ad = o['ad'] as String;
-      final myDomCtrl = _myDomKiyasCtrl[ad];
-      if (myDomCtrl != null && myDomCtrl.text.isNotEmpty) {
-        toplamSonuc += _parseDouble(myDomCtrl.text);
-      } else {
-        toplamSonuc += _parseDouble((o['ctrl'] as TextEditingController).text);
-      }
+      toplamSonuc += _parseDouble((o['ctrl'] as TextEditingController).text);
     }
     return brutSatis - toplamSonuc;
   }
@@ -10166,8 +10094,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     // İleri git: kapanmamış günden sonrasına geçilemez (ileri ok zaten pasif)
     // Geri git: serbest — kapanmamış günden geriye gidilebilir
     // Değişiklik varsa önce otomatik kaydet (timer beklemeden)
-    if (_degisiklikVar || _otomatikKaydetTimer?.isActive == true) {
-      _otomatikKaydetTimer?.cancel();
+    if (_degisiklikVar) {
       try {
         final tarihKey = _tarihKey(_secilenTarih);
         await FirebaseFirestore.instance
@@ -10247,7 +10174,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                       if (_duzenlemeAcik)
                                         _gercekDegisiklikVar = true;
                                     });
-                                    _otomatikKaydetBaslat();
                                   }
                                 },
                         ),
@@ -10275,7 +10201,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -10301,7 +10226,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _yemekKartlari.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _otomatikKaydetBaslat();
+                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -10440,7 +10365,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -10476,7 +10400,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -10504,7 +10427,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _posListesi.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _otomatikKaydetBaslat();
+                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -10637,7 +10560,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                               _degisiklikVar = true;
                               if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                             });
-                            _otomatikKaydetBaslat();
                             if (_kilitTutuyorum) {
                               _kilitTimer?.cancel();
                               _kilitTimer = Timer(
@@ -10873,7 +10795,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -10908,7 +10829,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -10936,7 +10856,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _harcamalar.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _otomatikKaydetBaslat();
+                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -11302,7 +11222,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -11335,7 +11254,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -11387,7 +11305,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                   _dovizler.removeAt(idx);
                                   _degisiklikVar = true;
                                 });
-                                _otomatikKaydetBaslat();
+                                _anindaKaydet();
                               },
                       ),
                     ],
@@ -11588,7 +11506,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _sectionTitle('Kasa Durumu', Icons.account_balance_wallet),
+            _sectionTitle('Kasa Özeti', Icons.summarize),
             // Devreden Flot - otomatik, readonly
             Container(
               decoration: BoxDecoration(
@@ -12725,7 +12643,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     if (_duzenlemeAcik)
                                       _gercekDegisiklikVar = true;
                                   });
-                                  _otomatikKaydetBaslat();
                                   if (_kilitTutuyorum) {
                                     _kilitTimer?.cancel();
                                     _kilitTimer = Timer(
@@ -12765,7 +12682,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                               _degisiklikVar = true;
                               if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                             });
-                            _otomatikKaydetBaslat();
                             if (_kilitTutuyorum) {
                               _kilitTimer?.cancel();
                               _kilitTimer = Timer(
@@ -12796,7 +12712,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _digerAlimlar.removeAt(idx);
                                 _degisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
+                              _anindaKaydet();
                             },
                     ),
                   ],
@@ -12881,7 +12797,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -12916,7 +12831,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -12944,7 +12858,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _anaKasaHarcamalari.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _otomatikKaydetBaslat();
+                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -13037,7 +12951,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -13072,7 +12985,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                              _otomatikKaydetBaslat();
                               if (_kilitTutuyorum) {
                                 _kilitTimer?.cancel();
                                 _kilitTimer = Timer(
@@ -13100,7 +13012,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _nakitCikislar.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _otomatikKaydetBaslat();
+                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -13214,7 +13126,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     if (_duzenlemeAcik)
                                       _gercekDegisiklikVar = true;
                                   });
-                                _otomatikKaydetBaslat();
                               },
                             ),
                           ),
@@ -13232,7 +13143,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                       _nakitDovizler.removeAt(idx);
                                       _degisiklikVar = true;
                                     });
-                                    _otomatikKaydetBaslat();
+                                    _anindaKaydet();
                                   },
                           ),
                         ],
@@ -13303,7 +13214,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _degisiklikVar = true;
                                 if (_duzenlemeAcik) _gercekDegisiklikVar = true;
                               });
-                            _otomatikKaydetBaslat();
                           },
                         ),
                       ],
@@ -13588,7 +13498,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                       _bankaDovizler.removeAt(idx);
                                       _degisiklikVar = true;
                                     });
-                                    _otomatikKaydetBaslat();
+                                    _anindaKaydet();
                                   },
                           ),
                         ],
@@ -13838,19 +13748,30 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                   fontSize: 12, color: Color(0xFF1565C0))),
                         ]),
                   ],
-                  if (_toplamNakitCikis > 0) ...[
-                    const SizedBox(height: 2),
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Nakit Çıkış',
-                              style: TextStyle(
-                                  fontSize: 12, color: Color(0xFF1976D2))),
-                          Text(_formatTL(_toplamNakitCikis),
-                              style: const TextStyle(
-                                  fontSize: 12, color: Color(0xFF1565C0))),
-                        ]),
-                  ],
+                  // Nakit Çıkış TL — açıklama varsa göster
+                  ...(_nakitCikislar
+                      .where((h) => _parseDouble(h.tutar) > 0)
+                      .map((h) {
+                    final aciklama = h.aciklama.trim();
+                    final etiket = aciklama.isNotEmpty
+                        ? 'Nakit Çıkış ($aciklama)'
+                        : 'Nakit Çıkış TL';
+                    return Column(children: [
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                                child: Text(etiket,
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF1976D2)))),
+                            Text(_formatTL(_parseDouble(h.tutar)),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF1565C0))),
+                          ]),
+                    ]);
+                  }).toList()),
                   const Divider(height: 10, color: Color(0xFF90CAF9)),
                   // Ana Kasa Kalanı — yeşil/kırmızı bant
                   Container(
@@ -13982,20 +13903,36 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                         ],
                       ),
                     ],
-                    if (nakitCikisT > 0) ...[
-                      const SizedBox(height: 2),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Nakit Çıkış',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: yaziRenk.withOpacity(0.8))),
-                          Text('$sembol ${nakitCikisT.toStringAsFixed(2)}',
-                              style: TextStyle(fontSize: 12, color: yaziRenk)),
-                        ],
-                      ),
-                    ],
+                    // Döviz nakit çıkış — açıklama varsa göster
+                    ...(_nakitDovizler
+                        .where((d) =>
+                            d['cins'] == t && (d['miktar'] as num? ?? 0) > 0)
+                        .map((d) {
+                      final aciklama =
+                          (d['aciklamaCtrl'] as TextEditingController?)
+                                  ?.text
+                                  .trim() ??
+                              '';
+                      final miktar = (d['miktar'] as num? ?? 0).toDouble();
+                      final etiket = aciklama.isNotEmpty
+                          ? 'Nakit Çıkış ($aciklama)'
+                          : 'Nakit Çıkış $sembol';
+                      return Column(children: [
+                        const SizedBox(height: 2),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                  child: Text(etiket,
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: yaziRenk.withOpacity(0.8)))),
+                              Text('$sembol ${miktar.toStringAsFixed(2)}',
+                                  style:
+                                      TextStyle(fontSize: 12, color: yaziRenk)),
+                            ]),
+                      ]);
+                    }).toList()),
                     const Divider(height: 10),
                     // Ana Kasa Kalanı
                     Row(
@@ -22277,7 +22214,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
         ),
       ),
       pw.SizedBox(height: 6),
-      bolumBaslik('KASA DURUMU', PdfColors.green700),
+      bolumBaslik('KASA ÖZETİ', PdfColors.green700),
       pw.Container(
         padding: const pw.EdgeInsets.all(6),
         decoration: pw.BoxDecoration(
@@ -22286,40 +22223,23 @@ class _OzetEkraniState extends State<OzetEkrani> {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            // Ekranda Görünen Nakit — kalın, koyu mavi
-            pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(vertical: 2),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Ekranda Görünen Nakit',
-                    style: pw.TextStyle(
-                      font: fontBold,
-                      fontSize: 10,
-                      color: PdfColors.blue900,
-                    ),
-                  ),
-                  pw.Text(
-                    fmt(d['ekrandaGorunenNakit']),
-                    style: pw.TextStyle(
-                      font: fontBold,
-                      fontSize: 10,
-                      color: PdfColors.blue900,
-                    ),
-                  ),
-                ],
+            // Banka Parası
+            satir('Banka Parası', fmt(d['bankaParasi'])),
+            if ((d['devredenFlot'] as num? ?? 0) > 0)
+              satir('Devreden Flot', fmt(d['devredenFlot'])),
+            if ((d['toplamHarcama'] as num? ?? 0) > 0)
+              satir('Harcamalar', fmt(d['toplamHarcama'])),
+            if ((d['gunlukFlot'] as num? ?? 0) > 0)
+              satir('Günlük Flot', fmt(d['gunlukFlot'])),
+            satir('Toplam Nakit', fmt(d['toplamNakitTL'])),
+            if (((d['kasaFarki'] ?? 0) as num).abs() >= 0.01)
+              satir(
+                'Kasa Farkı',
+                fmt(d['kasaFarki']),
+                style: ((d['kasaFarki'] ?? 0) as num) >= 0 ? yesil : kirmizi,
               ),
-            ),
-            satir('Devreden Flot', fmt(d['devredenFlot'])),
-            satir('Günün Flotu', fmt(d['gunlukFlot'])),
-            satir(
-              'Kasa Farkı',
-              fmt(d['kasaFarki']),
-              style: ((d['kasaFarki'] ?? 0) as num) >= 0 ? yesil : kirmizi,
-            ),
             pw.Divider(),
-            // Günlük Kasa Kalanı — belirgin, kırmızı
+            // Günlük Kasa Kalanı
             pw.Padding(
               padding: const pw.EdgeInsets.symmetric(vertical: 2),
               child: pw.Row(
@@ -22483,7 +22403,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
         pw.SizedBox(height: 6),
       ],
       bolumBaslik(
-        'ANA KASA',
+        'ANA KASA ÖZETİ',
         PdfColors.blue900,
         toplam: fmt(d['anaKasaKalani']),
       ),
@@ -22522,8 +22442,17 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   if ((d['toplamAnaKasaHarcama'] ?? 0) != 0)
                     satir('Ana Kasa Harcama', fmt(d['toplamAnaKasaHarcama'])),
                   satir('Bankaya Yatırılan', fmt(d['bankayaYatirilan'])),
-                  if ((d['toplamNakitCikis'] ?? 0) != 0)
-                    satir('Nakit Çıkış (TL)', fmt(d['toplamNakitCikis'])),
+                  // TL nakit çıkış — açıklama varsa göster
+                  ...((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
+                      .where((h) => (h['tutar'] as num? ?? 0) > 0)
+                      .map((h) {
+                    final aciklama = h['aciklama']?.toString().trim() ?? '';
+                    final etiket = aciklama.isNotEmpty
+                        ? 'Nakit Çıkış ($aciklama)'
+                        : 'Nakit Çıkış TL';
+                    return satir(etiket, fmt(h['tutar']));
+                  }),
+                  // Döviz nakit çıkış — açıklama varsa göster
                   ...((d['nakitDovizler'] as List?)?.cast<Map>() ?? [])
                       .where((nd) => (nd['miktar'] as num? ?? 0) > 0)
                       .map((nd) {
@@ -22536,10 +22465,12 @@ class _OzetEkraniState extends State<OzetEkrani> {
                                 ? '£'
                                 : cins;
                     final miktar = (nd['miktar'] as num).toDouble();
+                    final aciklama = nd['aciklama']?.toString().trim() ?? '';
+                    final etiket = aciklama.isNotEmpty
+                        ? 'Nakit Çıkış ($aciklama)'
+                        : 'Nakit Çıkış $sembol';
                     return satir(
-                      'Nakit Çıkış ($cins)',
-                      '$sembol ${miktar.toStringAsFixed(2)}',
-                    );
+                        etiket, '$sembol ${miktar.toStringAsFixed(2)}');
                   }),
                   pw.Padding(
                     padding: const pw.EdgeInsets.symmetric(vertical: 2),
