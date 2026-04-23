@@ -11497,7 +11497,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     );
   }
 
-  // ── Kasa Durumu ─────────────────────────────────────────────────────────────
+  // ── Kasa Özeti ─────────────────────────────────────────────────────────────
 
   Widget _ekBilgilerSection() {
     return Card(
@@ -23270,53 +23270,16 @@ class _OzetEkraniState extends State<OzetEkrani> {
                     ],
                   ),
                 ),
-                // Aylık toplam satış
-                if (_aylikSatisToplami > 0)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red[900],
-                      borderRadius: const BorderRadius.only(
-                        bottomLeft: Radius.circular(14),
-                        bottomRight: Radius.circular(14),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'AYLIK TOPLAM (1-${_secilenTarih.day})',
-                          style: TextStyle(
-                            color: Colors.red[200],
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        Text(
-                          _fmt(_aylikSatisToplami),
-                          style: TextStyle(
-                            color: Colors.red[100],
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
               ],
             ),
           ),
-        // POS Toplamı - sadece toplam
+        // POS Toplamı - sadece toplam, beyaz gövde yok
         _bolum(
           renk: const Color(0xFF0288D1),
           ikon: Icons.credit_card,
           baslik: 'POS TOPLAMI',
           toplam: _fmt(toplamPos),
+          hideBody: true,
           child: const SizedBox.shrink(),
         ),
         const SizedBox(height: 12),
@@ -23341,47 +23304,210 @@ class _OzetEkraniState extends State<OzetEkrani> {
         ),
         const SizedBox(height: 12),
 
-        // Kasa Durumu
+        // Kasa Özeti — Özet ve Kapat ekranıyla aynı yapı
         _bolum(
           renk: const Color(0xFF2E7D32),
-          ikon: Icons.account_balance_wallet,
-          baslik: 'KASA DURUMU',
+          ikon: Icons.summarize,
+          baslik: 'KASA ÖZETİ',
           child: Column(
             children: [
-              _kalemSatiriBold(
-                'Ekranda Görünen Nakit',
-                _fmt(_toDouble(d['ekrandaGorunenNakit'])),
-                renk: const Color(0xFF0288D1),
-              ),
-              _kalemSatiri('Devreden Flot', _fmt(devredenFlot)),
-              _kalemSatiri('Günün Flotu', _fmt(flotTutari)),
-              _kalemSatiriFark('Kasa Farkı', kasaFarki),
-              const Divider(height: 16),
-              _kalemSatiriBold(
-                'Günlük Kasa Kalanı',
-                _fmt(gunlukKasaKalani),
-                renk: gunlukKasaKalani >= 0
-                    ? Colors.green[700]!
-                    : Colors.red[700]!,
-              ),
-              if (dovizliTurler.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                _kalemSatiriAlt(
-                  '  ↳ TL',
-                  _fmt(gunlukKasaKalaniTL),
-                  Colors.green[700]!,
+              // TL Kartı
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE3F2FD),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF90CAF9)),
                 ),
-                ...dovizliTurler.map((t) {
-                  final sembol = _sembol(t);
-                  final miktar = dovizMiktarlari[t] ?? 0;
-                  final tlK = miktar * (dovizKurlar[t] ?? 0);
-                  return _kalemSatiriAlt(
-                    '  ↳ $t',
-                    '$sembol ${miktar.toStringAsFixed(2)} (${_fmt(tlK)})',
-                    dovizRenk(t),
-                  );
-                }),
-              ],
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 6),
+                      child: Row(children: [
+                        Text('TL',
+                            style: TextStyle(
+                                color: Color(0xFF1565C0),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                      ]),
+                    ),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Ekranda Görünen Nakit',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_fmt(_toDouble(d['ekrandaGorunenNakit'])),
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF0288D1),
+                                  fontWeight: FontWeight.bold)),
+                        ]),
+                    if (devredenFlot > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Devreden Flot',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF1976D2))),
+                            Text(_fmt(devredenFlot),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF1565C0))),
+                          ]),
+                    ],
+                    if (flotTutari > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Günlük Flot',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF1976D2))),
+                            Text(_fmt(flotTutari),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF1565C0))),
+                          ]),
+                    ],
+                    if (kasaFarki.abs() >= 0.01) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: kasaFarki >= 0
+                              ? Colors.green[600]
+                              : Colors.red[600],
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Kasa Farkı',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12)),
+                              Text(_fmt(kasaFarki),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13)),
+                            ]),
+                      ),
+                    ],
+                    const Divider(height: 12, color: Color(0xFF90CAF9)),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Günlük Kasa Kalanı',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(
+                            _fmt(gunlukKasaKalaniTL),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: gunlukKasaKalaniTL >= 0
+                                  ? const Color(0xFF1565C0)
+                                  : Colors.red[700],
+                            ),
+                          ),
+                        ]),
+                  ],
+                ),
+              ),
+              // Döviz Kartları
+              ...dovizliTurler.map((t) {
+                final sembol = _sembol(t);
+                final miktar = dovizMiktarlari[t] ?? 0;
+                final tlK = miktar * (dovizKurlar[t] ?? 0);
+                final bgRenk = t == 'USD'
+                    ? const Color(0xFFFFF8E1)
+                    : t == 'EUR'
+                        ? const Color(0xFFF3E5F5)
+                        : const Color(0xFFE8F5E9);
+                final yaziRenk = t == 'USD'
+                    ? const Color(0xFFE65100)
+                    : t == 'EUR'
+                        ? const Color(0xFF6A1B9A)
+                        : const Color(0xFF1B5E20);
+                final borderRenk = t == 'USD'
+                    ? const Color(0xFFFFCC80)
+                    : t == 'EUR'
+                        ? const Color(0xFFCE93D8)
+                        : const Color(0xFFA5D6A7);
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: bgRenk,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: borderRenk),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('$sembol $t',
+                                style: TextStyle(
+                                    color: yaziRenk,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13)),
+                            Text('$sembol ${miktar.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                    color: yaziRenk,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15)),
+                          ]),
+                      if (tlK > 0) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('TL Karşılığı',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: yaziRenk.withOpacity(0.8))),
+                              Text(_fmt(tlK),
+                                  style:
+                                      TextStyle(fontSize: 11, color: yaziRenk)),
+                            ]),
+                      ],
+                    ],
+                  ),
+                );
+              }),
+              // Günlük Toplam Kasa Kalanı bandı
+              const SizedBox(height: 4),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: gunlukKasaKalani >= 0
+                      ? Colors.green[700]
+                      : Colors.red[700],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Günlük Toplam Kasa Kalanı',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13)),
+                      Text(_fmt(gunlukKasaKalani),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15)),
+                    ]),
+              ),
             ],
           ),
         ),
@@ -23397,37 +23523,37 @@ class _OzetEkraniState extends State<OzetEkrani> {
             toplam: toplamNakitCikis > 0 ? _fmt(toplamNakitCikis) : null,
             child: Column(
               children: [
+                // TL kalemleri — açıklama varsa göster
                 if (toplamNakitCikis > 0)
                   ...((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
                       .where((h) => (h['tutar'] as num? ?? 0) > 0)
-                      .map(
-                        (h) => _kalemSatiri(
-                          h['aciklama']?.toString().isNotEmpty == true
-                              ? h['aciklama'].toString()
-                              : 'Nakit Çıkış',
-                          _fmt((h['tutar'] as num).toDouble()),
-                        ),
-                      ),
-                ...(() {
-                  final Map<String, double> dovizToplam = {};
-                  for (final nd in nakitDovizListesi
-                      .where((nd) => (nd['miktar'] as num? ?? 0) > 0)) {
-                    final cins = nd['cins'] as String? ?? '';
-                    dovizToplam[cins] = (dovizToplam[cins] ?? 0) +
-                        (nd['miktar'] as num).toDouble();
-                  }
-                  return dovizToplam.entries.map((e) {
-                    final sembol = e.key == 'USD'
-                        ? r'$'
-                        : e.key == 'EUR'
-                            ? '€'
-                            : e.key == 'GBP'
-                                ? '£'
-                                : e.key;
-                    return _kalemSatiri('Nakit ${e.key} Çıkış',
-                        '$sembol ${e.value.toStringAsFixed(2)}');
-                  });
-                })(),
+                      .map((h) {
+                    final aciklama = (h['aciklama'] as String? ?? '').trim();
+                    final etiket = aciklama.isNotEmpty
+                        ? 'TL - $aciklama'
+                        : 'Nakit Çıkış TL';
+                    return _kalemSatiri(
+                        etiket, _fmt((h['tutar'] as num).toDouble()));
+                  }),
+                // Döviz kalemleri — her biri ayrı, açıklama varsa "USD - Abcd" formatında
+                ...nakitDovizListesi
+                    .where((nd) => (nd['miktar'] as num? ?? 0) > 0)
+                    .map((nd) {
+                  final cins = nd['cins'] as String? ?? '';
+                  final sembol = cins == 'USD'
+                      ? r'$'
+                      : cins == 'EUR'
+                          ? '€'
+                          : cins == 'GBP'
+                              ? '£'
+                              : cins;
+                  final aciklama = (nd['aciklama'] as String? ?? '').trim();
+                  final etiket = aciklama.isNotEmpty
+                      ? '$cins - $aciklama'
+                      : 'Nakit Çıkış $cins';
+                  return _kalemSatiri(etiket,
+                      '$sembol ${(nd['miktar'] as num).toStringAsFixed(2)}');
+                }),
               ],
             ),
           ),
@@ -23458,57 +23584,137 @@ class _OzetEkraniState extends State<OzetEkrani> {
           const SizedBox(height: 12),
         ],
 
-        // Ana Kasa
+        // Ana Kasa Özeti — Özet ve Kapat ekranıyla aynı yapı
         _bolum(
           renk: const Color(0xFF1565C0),
           ikon: Icons.account_balance,
-          baslik: 'ANA KASA',
+          baslik: 'ANA KASA ÖZETİ',
           child: Column(
             children: [
-              // TL
+              // TL Kartı
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFFE3F2FD),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF90CAF9)),
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'TL',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1565C0),
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 6),
+                      child: Row(children: [
+                        Text('TL',
+                            style: TextStyle(
+                                color: Color(0xFF1565C0),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                      ]),
+                    ),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Devreden Ana Kasa',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_fmt(oncekiAnaKasaKalani),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Günlük Kasa Kalanı (TL)',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_fmt(gunlukKasaKalaniTL),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                    if (bankayaYatirilan > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Bankaya Yatırılan',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF1976D2))),
+                            Text(_fmt(bankayaYatirilan),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF1565C0))),
+                          ]),
+                    ],
+                    if (toplamAnaKasaHarcama > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Ana Kasa Harcamalar',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF1976D2))),
+                            Text(_fmt(toplamAnaKasaHarcama),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF1565C0))),
+                          ]),
+                    ],
+                    // Nakit Çıkış TL kalemleri — açıklama varsa göster
+                    ...((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
+                        .where((h) => (h['tutar'] as num? ?? 0) > 0)
+                        .map((h) {
+                      final aciklama = (h['aciklama'] as String? ?? '').trim();
+                      final etiket = aciklama.isNotEmpty
+                          ? 'Nakit Çıkış ($aciklama)'
+                          : 'Nakit Çıkış TL';
+                      return Column(children: [
+                        const SizedBox(height: 2),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                  child: Text(etiket,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF1976D2)))),
+                              Text(_fmt((h['tutar'] as num).toDouble()),
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Color(0xFF1565C0))),
+                            ]),
+                      ]);
+                    }),
+                    const Divider(height: 10, color: Color(0xFF90CAF9)),
+                    // Ana Kasa Kalanı — yeşil/kırmızı bant
+                    Container(
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: anaKasaKalani >= 0
+                            ? Colors.green[700]
+                            : Colors.red[700],
+                        borderRadius: BorderRadius.circular(6),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    _kalemSatiri(
-                      'Devreden Ana Kasa',
-                      _fmt(oncekiAnaKasaKalani),
-                    ),
-                    _kalemSatiri(
-                      'Günlük Kasa Kalanı (TL)',
-                      _fmt(gunlukKasaKalaniTL),
-                    ),
-                    if (toplamAnaKasaHarcama > 0)
-                      _kalemSatiri(
-                        'Ana Kasa Harcama',
-                        _fmt(toplamAnaKasaHarcama),
-                      ),
-                    _kalemSatiri('Bankaya Yatırılan', _fmt(bankayaYatirilan)),
-                    _kalemSatiriBold(
-                      'Ana Kasa Kalanı',
-                      _fmt(anaKasaKalani),
-                      renk: anaKasaKalani >= 0
-                          ? Colors.green[700]!
-                          : Colors.red[700]!,
+                      child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Ana Kasa Kalanı',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13)),
+                            Text(_fmt(anaKasaKalani),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15)),
+                          ]),
                     ),
                   ],
                 ),
               ),
-              // Dövizler — PDF ile aynı renk paleti
+              // Döviz Kartları — _anaKasaSection ile aynı renk paleti
               ...dovizTurleri.where((t) {
                 final kalan = _toDouble(dovizKalanlar?[t]);
                 final devreden = _toDouble(oncekiDovizKalanlar?[t]);
@@ -23522,74 +23728,126 @@ class _OzetEkraniState extends State<OzetEkrani> {
                 for (var bd in bankaDovizListesi) {
                   if (bd['cins'] == t) bankaYatan += _toDouble(bd['miktar']);
                 }
-
-                // Döviz cinsine göre sabit renk — USD turuncu, EUR mor, GBP yeşil
                 final bgRenk = t == 'USD'
-                    ? Colors.orange[50]!
+                    ? const Color(0xFFFFF8E1)
                     : t == 'EUR'
-                        ? Colors.purple[50]!
-                        : Colors.teal[50]!;
+                        ? const Color(0xFFF3E5F5)
+                        : const Color(0xFFE8F5E9);
                 final yaziRenk = t == 'USD'
-                    ? Colors.orange[800]!
+                    ? const Color(0xFFE65100)
                     : t == 'EUR'
-                        ? Colors.purple[800]!
-                        : Colors.teal[800]!;
-                final kalanRenk = t == 'USD'
-                    ? Colors.deepOrange[700]!
+                        ? const Color(0xFF6A1B9A)
+                        : const Color(0xFF1B5E20);
+                final borderRenk = t == 'USD'
+                    ? const Color(0xFFFFCC80)
                     : t == 'EUR'
-                        ? Colors.purple[700]!
-                        : Colors.teal[700]!;
-
+                        ? const Color(0xFFCE93D8)
+                        : const Color(0xFFA5D6A7);
                 return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(10),
+                  margin: const EdgeInsets.only(top: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: bgRenk,
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: borderRenk),
                   ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '$sembol $t',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: yaziRenk,
-                        ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(children: [
+                          Text('$sembol $t',
+                              style: TextStyle(
+                                  color: yaziRenk,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                        ]),
                       ),
-                      const SizedBox(height: 4),
-                      _kalemSatiri(
-                        'Devreden Ana Kasa',
-                        '$sembol ${devreden.toStringAsFixed(2)}',
-                      ),
-                      _kalemSatiri(
-                        'Günlük Kasa Kalanı',
-                        '$sembol ${(dovizMiktarlari[t] ?? 0).toStringAsFixed(2)}',
-                      ),
-                      if (bankaYatan > 0)
-                        _kalemSatiri(
-                          'Bankaya Yatırılan',
-                          '$sembol ${bankaYatan.toStringAsFixed(2)}',
-                        ),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Devreden Ana Kasa',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: yaziRenk.withOpacity(0.8))),
+                            Text('$sembol ${devreden.toStringAsFixed(2)}',
+                                style:
+                                    TextStyle(fontSize: 12, color: yaziRenk)),
+                          ]),
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Günlük Kasa Kalanı',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: yaziRenk.withOpacity(0.8))),
+                            Text(
+                                '$sembol ${(dovizMiktarlari[t] ?? 0).toStringAsFixed(2)}',
+                                style:
+                                    TextStyle(fontSize: 12, color: yaziRenk)),
+                          ]),
+                      if (bankaYatan > 0) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Bankaya Yatırılan',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: yaziRenk.withOpacity(0.8))),
+                              Text('$sembol ${bankaYatan.toStringAsFixed(2)}',
+                                  style:
+                                      TextStyle(fontSize: 12, color: yaziRenk)),
+                            ]),
+                      ],
+                      // Döviz nakit çıkış kalemleri
                       ...nakitDovizListesi
-                          .where(
-                            (nd) =>
-                                nd['cins'] == t &&
-                                (nd['miktar'] as num? ?? 0) > 0,
-                          )
-                          .map(
-                            (nd) => _kalemSatiri(
-                              nd['aciklama']?.toString().isNotEmpty == true
-                                  ? nd['aciklama'].toString()
-                                  : 'Nakit Çıkış',
-                              '$sembol ${(nd['miktar'] as num).toStringAsFixed(2)}',
+                          .where((nd) =>
+                              nd['cins'] == t &&
+                              (nd['miktar'] as num? ?? 0) > 0)
+                          .map((nd) {
+                        final aciklama =
+                            (nd['aciklama'] as String? ?? '').trim();
+                        final etiket = aciklama.isNotEmpty
+                            ? 'Nakit Çıkış ($aciklama)'
+                            : 'Nakit Çıkış $sembol';
+                        return Column(children: [
+                          const SizedBox(height: 2),
+                          Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                    child: Text(etiket,
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            color: yaziRenk.withOpacity(0.8)))),
+                                Text(
+                                    '$sembol ${(nd['miktar'] as num).toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                        fontSize: 12, color: yaziRenk)),
+                              ]),
+                        ]);
+                      }),
+                      const Divider(height: 10),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Ana Kasa Kalanı',
+                                style: TextStyle(
+                                    color: yaziRenk,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13)),
+                            Text(
+                              '$sembol ${kalan.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                color: kalan >= 0 ? yaziRenk : Colors.red[700],
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
                             ),
-                          ),
-                      _kalemSatiriBold(
-                        'Ana Kasa Kalanı',
-                        '$sembol ${kalan.toStringAsFixed(2)}',
-                        renk: kalanRenk,
-                      ),
+                          ]),
                     ],
                   ),
                 );
@@ -23917,6 +24175,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
     required String baslik,
     String? toplam,
     required Widget child,
+    bool hideBody = false,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -23936,10 +24195,12 @@ class _OzetEkraniState extends State<OzetEkrani> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: renk,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(14),
-                topRight: Radius.circular(14),
-              ),
+              borderRadius: hideBody
+                  ? BorderRadius.circular(14)
+                  : const BorderRadius.only(
+                      topLeft: Radius.circular(14),
+                      topRight: Radius.circular(14),
+                    ),
             ),
             child: Row(
               children: [
@@ -23977,7 +24238,8 @@ class _OzetEkraniState extends State<OzetEkrani> {
               ],
             ),
           ),
-          Padding(padding: const EdgeInsets.all(14), child: child),
+          if (!hideBody)
+            Padding(padding: const EdgeInsets.all(14), child: child),
         ],
       ),
     );
