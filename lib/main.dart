@@ -3261,13 +3261,16 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     ];
     for (var c in controllers) {
       c.addListener(() {
-        if (mounted && !_yukleniyor && !_readOnly) {
+        if (!mounted || _yukleniyor || _readOnly) return;
+        // setState'i bir sonraki frame'e ertele — build sırasında çağrılmasını önle
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
           setState(() {
             _degisiklikVar = true;
             if (_duzenlemeAcik) _gercekDegisiklikVar = true;
           });
           _kilitAl();
-        }
+        });
       });
     }
   }
@@ -13748,30 +13751,23 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                   fontSize: 12, color: Color(0xFF1565C0))),
                         ]),
                   ],
-                  // Nakit Çıkış TL — açıklama varsa göster
-                  ...(_nakitCikislar
-                      .where((h) => _parseDouble(h.tutar) > 0)
-                      .map((h) {
-                    final aciklama = h.aciklama.trim();
-                    final etiket = aciklama.isNotEmpty
-                        ? 'Nakit Çıkış ($aciklama)'
-                        : 'Nakit Çıkış TL';
-                    return Column(children: [
-                      const SizedBox(height: 2),
-                      Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                                child: Text(etiket,
-                                    style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFF1976D2)))),
-                            Text(_formatTL(_parseDouble(h.tutar)),
-                                style: const TextStyle(
-                                    fontSize: 12, color: Color(0xFF1565C0))),
-                          ]),
-                    ]);
-                  }).toList()),
+                  // Nakit Çıkış TL — toplam (açıklama yok)
+                  if (_nakitCikislar.any((h) => _parseDouble(h.tutar) > 0)) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Nakit Çıkış',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(
+                            _formatTL(_nakitCikislar.fold(
+                                0.0, (s, h) => s + _parseDouble(h.tutar))),
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF1565C0)),
+                          ),
+                        ]),
+                  ],
                   const Divider(height: 10, color: Color(0xFF90CAF9)),
                   // Ana Kasa Kalanı — yeşil/kırmızı bant
                   Container(
@@ -13903,36 +13899,21 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                         ],
                       ),
                     ],
-                    // Döviz nakit çıkış — açıklama varsa göster
-                    ...(_nakitDovizler
-                        .where((d) =>
-                            d['cins'] == t && (d['miktar'] as num? ?? 0) > 0)
-                        .map((d) {
-                      final aciklama =
-                          (d['aciklamaCtrl'] as TextEditingController?)
-                                  ?.text
-                                  .trim() ??
-                              '';
-                      final miktar = (d['miktar'] as num? ?? 0).toDouble();
-                      final etiket = aciklama.isNotEmpty
-                          ? 'Nakit Çıkış ($aciklama)'
-                          : 'Nakit Çıkış $sembol';
-                      return Column(children: [
-                        const SizedBox(height: 2),
-                        Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                  child: Text(etiket,
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: yaziRenk.withOpacity(0.8)))),
-                              Text('$sembol ${miktar.toStringAsFixed(2)}',
-                                  style:
-                                      TextStyle(fontSize: 12, color: yaziRenk)),
-                            ]),
-                      ]);
-                    }).toList()),
+                    // Döviz nakit çıkış — toplam (açıklama yok)
+                    if (nakitCikisT > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Nakit Çıkış',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: yaziRenk.withOpacity(0.8))),
+                            Text('$sembol ${nakitCikisT.toStringAsFixed(2)}',
+                                style:
+                                    TextStyle(fontSize: 12, color: yaziRenk)),
+                          ]),
+                    ],
                     const Divider(height: 10),
                     // Ana Kasa Kalanı
                     Row(
@@ -14811,6 +14792,384 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                   _kasaOzetiSection(),
                                   const SizedBox(height: 12),
                                   _anaKasaSection(),
+                                  const SizedBox(height: 12),
+                                  // ── Transferler (varsa) ──
+                                  Builder(builder: (context) {
+                                    final sadeceTrf = _transferler
+                                        .where((t) =>
+                                            t['kategori'] == 'GİDEN' ||
+                                            t['kategori'] == 'GELEN')
+                                        .toList();
+                                    if (sadeceTrf.isEmpty)
+                                      return const SizedBox.shrink();
+                                    final gidenler = sadeceTrf
+                                        .where((t) => t['kategori'] == 'GİDEN')
+                                        .toList();
+                                    final gelenler = sadeceTrf
+                                        .where((t) => t['kategori'] == 'GELEN')
+                                        .toList();
+                                    final toplamGiden = gidenler.fold(
+                                        0.0,
+                                        (s, t) =>
+                                            s +
+                                            _parseDouble((t['tutarCtrl']
+                                                    as TextEditingController)
+                                                .text));
+                                    final toplamGelen = gelenler.fold(
+                                        0.0,
+                                        (s, t) =>
+                                            s +
+                                            _parseDouble((t['tutarCtrl']
+                                                    as TextEditingController)
+                                                .text));
+                                    final netTransfer =
+                                        toplamGelen - toplamGiden;
+
+                                    Widget kalemRenk(String label, String deger,
+                                            Color renk) =>
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 2),
+                                          child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Text(label,
+                                                    style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: renk)),
+                                                Text(deger,
+                                                    style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: renk,
+                                                        fontWeight:
+                                                            FontWeight.bold)),
+                                              ]),
+                                        );
+
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(14),
+                                        boxShadow: [
+                                          BoxShadow(
+                                              color: const Color(0xFF546E7A)
+                                                  .withOpacity(0.1),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 2))
+                                        ],
+                                      ),
+                                      child: Column(children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16, vertical: 10),
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFF546E7A),
+                                            borderRadius: BorderRadius.only(
+                                                topLeft: Radius.circular(14),
+                                                topRight: Radius.circular(14)),
+                                          ),
+                                          child: Row(children: [
+                                            const Icon(Icons.swap_horiz,
+                                                color: Colors.white, size: 18),
+                                            const SizedBox(width: 8),
+                                            const Text('TRANSFERLER',
+                                                style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                    letterSpacing: 1)),
+                                          ]),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.all(14),
+                                          child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                if (gidenler.isNotEmpty) ...[
+                                                  Text('GİDEN',
+                                                      style: TextStyle(
+                                                          color:
+                                                              Colors.red[700],
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 12)),
+                                                  ...gidenler.map((t) {
+                                                    final hedefAd = (t['hedefSubeAd']
+                                                                    as String?)
+                                                                ?.isNotEmpty ==
+                                                            true
+                                                        ? t['hedefSubeAd']
+                                                            as String
+                                                        : (t['hedefSube']
+                                                                as String? ??
+                                                            '');
+                                                    final aciklama =
+                                                        t['aciklama']
+                                                                as String? ??
+                                                            '';
+                                                    final aciklamaTemiz =
+                                                        aciklama == hedefAd ||
+                                                                aciklama ==
+                                                                    (t['hedefSube'] ??
+                                                                        '')
+                                                            ? ''
+                                                            : aciklama;
+                                                    final label = [
+                                                      if (hedefAd.isNotEmpty)
+                                                        hedefAd,
+                                                      if (aciklamaTemiz
+                                                          .isNotEmpty)
+                                                        aciklamaTemiz
+                                                    ].join(' - ');
+                                                    return kalemRenk(
+                                                        label.isEmpty
+                                                            ? 'Transfer'
+                                                            : label,
+                                                        '- ${_formatTL(_parseDouble((t['tutarCtrl'] as TextEditingController).text))}',
+                                                        Colors.red[700]!);
+                                                  }),
+                                                  const SizedBox(height: 4),
+                                                ],
+                                                if (gelenler.isNotEmpty) ...[
+                                                  const Text('GELEN',
+                                                      style: TextStyle(
+                                                          color:
+                                                              Color(0xFF0288D1),
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 12)),
+                                                  ...gelenler.map((t) {
+                                                    final kaynakAd = (t['kaynakSubeAd']
+                                                                    as String?)
+                                                                ?.isNotEmpty ==
+                                                            true
+                                                        ? t['kaynakSubeAd']
+                                                            as String
+                                                        : (_subeAdlari[t[
+                                                                'kaynakSube']] ??
+                                                            t['kaynakSube']
+                                                                as String? ??
+                                                            '');
+                                                    final aciklama =
+                                                        t['aciklama']
+                                                                as String? ??
+                                                            '';
+                                                    final aciklamaTemiz =
+                                                        aciklama == kaynakAd ||
+                                                                aciklama ==
+                                                                    (t['kaynakSube'] ??
+                                                                        '')
+                                                            ? ''
+                                                            : aciklama;
+                                                    final label = [
+                                                      if (kaynakAd.isNotEmpty)
+                                                        kaynakAd,
+                                                      if (aciklamaTemiz
+                                                          .isNotEmpty)
+                                                        aciklamaTemiz
+                                                    ].join(' - ');
+                                                    return kalemRenk(
+                                                        label.isEmpty
+                                                            ? 'Transfer'
+                                                            : label,
+                                                        '+ ${_formatTL(_parseDouble((t['tutarCtrl'] as TextEditingController).text))}',
+                                                        const Color(
+                                                            0xFF0288D1));
+                                                  }),
+                                                  const SizedBox(height: 4),
+                                                ],
+                                                if (toplamGiden > 0 ||
+                                                    toplamGelen > 0) ...[
+                                                  const Divider(),
+                                                  if (toplamGiden > 0)
+                                                    kalemRenk(
+                                                        'Toplam Giden',
+                                                        '- ${_formatTL(toplamGiden)}',
+                                                        Colors.red[700]!),
+                                                  if (toplamGelen > 0)
+                                                    kalemRenk(
+                                                        'Toplam Gelen',
+                                                        '+ ${_formatTL(toplamGelen)}',
+                                                        const Color(
+                                                            0xFF0288D1)),
+                                                  if (toplamGiden > 0 &&
+                                                      toplamGelen > 0)
+                                                    Padding(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          vertical: 2),
+                                                      child: Row(
+                                                          mainAxisAlignment:
+                                                              MainAxisAlignment
+                                                                  .spaceBetween,
+                                                          children: [
+                                                            Text('Net Transfer',
+                                                                style: TextStyle(
+                                                                    fontSize:
+                                                                        12,
+                                                                    color: netTransfer >=
+                                                                            0
+                                                                        ? const Color(
+                                                                            0xFF0288D1)
+                                                                        : Colors.red[
+                                                                            700],
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold)),
+                                                            Text(
+                                                                '${netTransfer >= 0 ? '+' : '-'} ${_formatTL(netTransfer.abs())}',
+                                                                style: TextStyle(
+                                                                    fontSize:
+                                                                        12,
+                                                                    color: netTransfer >=
+                                                                            0
+                                                                        ? const Color(
+                                                                            0xFF0288D1)
+                                                                        : Colors.red[
+                                                                            700],
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold)),
+                                                          ]),
+                                                    ),
+                                                ],
+                                              ]),
+                                        ),
+                                      ]),
+                                    );
+                                  }),
+                                  const SizedBox(height: 12),
+                                  // ── Diğer Alımlar (varsa) ──
+                                  Builder(builder: (context) {
+                                    final digerListesi =
+                                        _digerAlimlar.where((da) {
+                                      final aciklama = ((da['aciklamaCtrl']
+                                                      as TextEditingController?)
+                                                  ?.text ??
+                                              (da['aciklama'] ?? ''))
+                                          .toString()
+                                          .trim();
+                                      final tutar = _parseDouble(
+                                          (da['tutarCtrl']
+                                                      as TextEditingController?)
+                                                  ?.text ??
+                                              '0');
+                                      return aciklama.isNotEmpty || tutar > 0;
+                                    }).toList();
+                                    if (digerListesi.isEmpty)
+                                      return const SizedBox.shrink();
+                                    final toplam = digerListesi.fold(
+                                        0.0,
+                                        (s, da) =>
+                                            s +
+                                            _parseDouble((da['tutarCtrl']
+                                                        as TextEditingController?)
+                                                    ?.text ??
+                                                '0'));
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(14),
+                                        boxShadow: [
+                                          BoxShadow(
+                                              color:
+                                                  Colors.grey.withOpacity(0.1),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 2))
+                                        ],
+                                      ),
+                                      child: Column(children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: Colors.grey[700],
+                                            borderRadius:
+                                                const BorderRadius.only(
+                                                    topLeft:
+                                                        Radius.circular(14),
+                                                    topRight:
+                                                        Radius.circular(14)),
+                                          ),
+                                          child: Row(children: [
+                                            const Icon(
+                                                Icons.shopping_bag_outlined,
+                                                color: Colors.white,
+                                                size: 18),
+                                            const SizedBox(width: 8),
+                                            const Text('DİĞER ALIMLAR',
+                                                style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                    letterSpacing: 1)),
+                                            const Spacer(),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 4),
+                                              decoration: BoxDecoration(
+                                                  color: Colors.white
+                                                      .withOpacity(0.2),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          20)),
+                                              child: Text(_formatTL(toplam),
+                                                  style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 16)),
+                                            ),
+                                          ]),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.all(14),
+                                          child: Column(
+                                              children: digerListesi.map((da) {
+                                            final aciklama = ((da[
+                                                                'aciklamaCtrl']
+                                                            as TextEditingController?)
+                                                        ?.text ??
+                                                    (da['aciklama'] ?? ''))
+                                                .toString()
+                                                .trim();
+                                            final tutar = _parseDouble((da[
+                                                            'tutarCtrl']
+                                                        as TextEditingController?)
+                                                    ?.text ??
+                                                '0');
+                                            if (tutar == 0)
+                                              return const SizedBox.shrink();
+                                            return Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 2),
+                                              child: Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment
+                                                          .spaceBetween,
+                                                  children: [
+                                                    Text(aciklama,
+                                                        style: const TextStyle(
+                                                            fontSize: 12)),
+                                                    Text(_formatTL(tutar),
+                                                        style: const TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight:
+                                                                FontWeight
+                                                                    .bold)),
+                                                  ]),
+                                            );
+                                          }).toList()),
+                                        ),
+                                      ]),
+                                    );
+                                  }),
                                   const SizedBox(height: 24),
                                   if (_dovizLimitiAsildi)
                                     Container(
@@ -22155,36 +22514,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   ],
                 ),
               ),
-              if ((aylikSatisToplami ?? 0) > 0)
-                pw.Container(
-                  width: double.infinity,
-                  color: PdfColors.red900,
-                  padding: const pw.EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        'AYLIK TOPLAM (1-${_secilenTarih.day})',
-                        style: pw.TextStyle(
-                          font: font,
-                          color: PdfColor.fromHex('#FFCDD2'),
-                          fontSize: 10,
-                        ),
-                      ),
-                      pw.Text(
-                        fmt(aylikSatisToplami!),
-                        style: pw.TextStyle(
-                          font: fontBold,
-                          color: PdfColor.fromHex('#FFCDD2'),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              if ((aylikSatisToplami ?? 0) > 0) pw.SizedBox.shrink(),
             ],
           ),
         ),
@@ -22215,15 +22545,25 @@ class _OzetEkraniState extends State<OzetEkrani> {
       ),
       pw.SizedBox(height: 6),
       bolumBaslik('KASA ÖZETİ', PdfColors.green700),
+      pw.SizedBox(height: 4),
+      // TL Kartı
       pw.Container(
-        padding: const pw.EdgeInsets.all(6),
+        margin: const pw.EdgeInsets.only(bottom: 6),
+        padding: const pw.EdgeInsets.all(8),
         decoration: pw.BoxDecoration(
-          border: pw.Border.all(color: PdfColors.grey300),
+          color: PdfColors.blue50,
+          border: pw.Border.all(color: PdfColors.blue200),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
         ),
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            // Banka Parası
+            pw.Text('TL',
+                style: pw.TextStyle(
+                    font: fontBold,
+                    fontSize: 10,
+                    color: PdfColor.fromHex('#1565C0'))),
+            pw.SizedBox(height: 4),
             satir('Banka Parası', fmt(d['bankaParasi'])),
             if ((d['devredenFlot'] as num? ?? 0) > 0)
               satir('Devreden Flot', fmt(d['devredenFlot'])),
@@ -22233,98 +22573,125 @@ class _OzetEkraniState extends State<OzetEkrani> {
               satir('Günlük Flot', fmt(d['gunlukFlot'])),
             satir('Toplam Nakit', fmt(d['toplamNakitTL'])),
             if (((d['kasaFarki'] ?? 0) as num).abs() >= 0.01)
-              satir(
-                'Kasa Farkı',
-                fmt(d['kasaFarki']),
-                style: ((d['kasaFarki'] ?? 0) as num) >= 0 ? yesil : kirmizi,
-              ),
-            pw.Divider(),
-            // Günlük Kasa Kalanı
-            pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(vertical: 2),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Günlük Kasa Kalanı',
-                    style: pw.TextStyle(font: fontBold, fontSize: 11),
-                  ),
-                  pw.Text(
-                    fmt(d['gunlukKasaKalani']),
-                    style: pw.TextStyle(
-                      font: fontBold,
-                      fontSize: 11,
-                      color: (_toDouble(d['gunlukKasaKalani']) >= 0)
-                          ? PdfColors.green700
-                          : PdfColors.red700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (dovizliTurler.isNotEmpty) ...[
-              // TL satırı — büyük ve kalın
-              pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(vertical: 2),
+              pw.Container(
+                margin: const pw.EdgeInsets.symmetric(vertical: 4),
+                padding:
+                    const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                color: ((d['kasaFarki'] ?? 0) as num) >= 0
+                    ? PdfColors.green600
+                    : PdfColors.red600,
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text(
-                      'TL',
-                      style: pw.TextStyle(
-                        font: fontBold,
-                        fontSize: 11,
-                        color: PdfColors.green800,
-                      ),
-                    ),
-                    pw.Text(
-                      fmt(d['gunlukKasaKalaniTL']),
-                      style: pw.TextStyle(
-                        font: fontBold,
-                        fontSize: 11,
-                        color: PdfColors.green800,
-                      ),
-                    ),
+                    pw.Text('Kasa Farkı',
+                        style: pw.TextStyle(
+                            font: fontBold,
+                            fontSize: 10,
+                            color: PdfColors.white)),
+                    pw.Text(fmt(d['kasaFarki']),
+                        style: pw.TextStyle(
+                            font: fontBold,
+                            fontSize: 10,
+                            color: PdfColors.white)),
                   ],
                 ),
               ),
-              // Döviz satırları — her biri farklı renk
-              ...dovizliTurler.map((t) {
-                // USD turuncu, EUR mor, GBP koyu yeşil
-                final renk = t == 'USD'
-                    ? PdfColor.fromHex('#E65100')
-                    : t == 'EUR'
-                        ? PdfColor.fromHex('#6A1B9A')
-                        : PdfColor.fromHex('#1B5E20');
-                final sembol = dovizSembolleri[t] ?? t;
-                final miktar = dovizMiktarlari[t] ?? 0;
-                final tlK = miktar * (dovizKurlar[t] ?? 0);
-                return pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                  child: pw.Row(
+            pw.Divider(color: PdfColors.blue200),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Günlük Kasa Kalanı',
+                    style: pw.TextStyle(
+                        font: fontBold,
+                        fontSize: 10,
+                        color: PdfColor.fromHex('#1565C0'))),
+                pw.Text(
+                  fmt(d['gunlukKasaKalaniTL']),
+                  style: pw.TextStyle(
+                    font: fontBold,
+                    fontSize: 10,
+                    color: (_toDouble(d['gunlukKasaKalaniTL']) >= 0)
+                        ? PdfColor.fromHex('#1565C0')
+                        : PdfColors.red700,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      // Döviz Kartları
+      ...dovizliTurler.map((t) {
+        final sembol = dovizSembolleri[t] ?? t;
+        final miktar = dovizMiktarlari[t] ?? 0;
+        final tlK = miktar * (dovizKurlar[t] ?? 0);
+        final bgRenk = t == 'USD'
+            ? PdfColors.orange50
+            : t == 'EUR'
+                ? PdfColors.purple50
+                : PdfColors.teal50;
+        final yaziRenk = t == 'USD'
+            ? PdfColor.fromHex('#E65100')
+            : t == 'EUR'
+                ? PdfColor.fromHex('#6A1B9A')
+                : PdfColor.fromHex('#1B5E20');
+        final borderRenk = t == 'USD'
+            ? PdfColors.orange200
+            : t == 'EUR'
+                ? PdfColors.purple200
+                : PdfColors.teal200;
+        return pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 6),
+          padding: const pw.EdgeInsets.all(8),
+          decoration: pw.BoxDecoration(
+            color: bgRenk,
+            border: pw.Border.all(color: borderRenk),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+          ),
+          child: pw.Column(
+            children: [
+              pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('$sembol $t',
+                        style: pw.TextStyle(
+                            font: fontBold, fontSize: 10, color: yaziRenk)),
+                    pw.Text('$sembol ${miktar.toStringAsFixed(2)}',
+                        style: pw.TextStyle(
+                            font: fontBold, fontSize: 11, color: yaziRenk)),
+                  ]),
+              if (tlK > 0) ...[
+                pw.SizedBox(height: 2),
+                pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     children: [
-                      pw.Text(
-                        t,
-                        style: pw.TextStyle(
-                          font: fontBold,
-                          fontSize: 10,
-                          color: renk,
-                        ),
-                      ),
-                      pw.Text(
-                        '$sembol ${miktar.toStringAsFixed(2)} (${fmt(tlK)})',
-                        style: pw.TextStyle(
-                          font: fontBold,
-                          fontSize: 10,
-                          color: renk,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
+                      pw.Text('TL Karşılığı',
+                          style: pw.TextStyle(
+                              font: font, fontSize: 9, color: yaziRenk)),
+                      pw.Text(fmt(tlK),
+                          style: pw.TextStyle(
+                              font: font, fontSize: 9, color: yaziRenk)),
+                    ]),
+              ],
             ],
+          ),
+        );
+      }),
+      // Günlük Toplam Kasa Kalanı Bandı
+      pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        color: (_toDouble(d['gunlukKasaKalani']) >= 0)
+            ? PdfColors.green700
+            : PdfColors.red700,
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('Günlük Toplam Kasa Kalanı',
+                style: pw.TextStyle(
+                    font: fontBold, fontSize: 11, color: PdfColors.white)),
+            pw.Text(fmt(d['gunlukKasaKalani']),
+                style: pw.TextStyle(
+                    font: fontBold, fontSize: 11, color: PdfColors.white)),
           ],
         ),
       ),
@@ -22420,77 +22787,56 @@ class _OzetEkraniState extends State<OzetEkrani> {
               padding: const pw.EdgeInsets.all(6),
               decoration: pw.BoxDecoration(
                 color: PdfColors.blue50,
+                border: pw.Border.all(color: PdfColors.blue200),
                 borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
               ),
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text(
-                    'TL',
-                    style: pw.TextStyle(
-                      font: fontBold,
-                      fontSize: 10,
-                      color: PdfColor.fromHex('#1565C0'),
-                    ),
-                  ),
-                  pw.SizedBox(height: 2),
+                  pw.Text('TL',
+                      style: pw.TextStyle(
+                          font: fontBold,
+                          fontSize: 10,
+                          color: PdfColor.fromHex('#1565C0'))),
+                  pw.SizedBox(height: 4),
                   satir('Devreden Ana Kasa', fmt(d['oncekiAnaKasaKalani'])),
                   satir(
-                    'Günlük Kasa Kalanı (TL)',
-                    fmt(d['gunlukKasaKalaniTL']),
-                  ),
-                  if ((d['toplamAnaKasaHarcama'] ?? 0) != 0)
-                    satir('Ana Kasa Harcama', fmt(d['toplamAnaKasaHarcama'])),
-                  satir('Bankaya Yatırılan', fmt(d['bankayaYatirilan'])),
-                  // TL nakit çıkış — açıklama varsa göster
-                  ...((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
-                      .where((h) => (h['tutar'] as num? ?? 0) > 0)
-                      .map((h) {
-                    final aciklama = h['aciklama']?.toString().trim() ?? '';
-                    final etiket = aciklama.isNotEmpty
-                        ? 'Nakit Çıkış ($aciklama)'
-                        : 'Nakit Çıkış TL';
-                    return satir(etiket, fmt(h['tutar']));
-                  }),
-                  // Döviz nakit çıkış — açıklama varsa göster
-                  ...((d['nakitDovizler'] as List?)?.cast<Map>() ?? [])
-                      .where((nd) => (nd['miktar'] as num? ?? 0) > 0)
-                      .map((nd) {
-                    final cins = nd['cins'] as String? ?? '';
-                    final sembol = cins == 'USD'
-                        ? r'$'
-                        : cins == 'EUR'
-                            ? '€'
-                            : cins == 'GBP'
-                                ? '£'
-                                : cins;
-                    final miktar = (nd['miktar'] as num).toDouble();
-                    final aciklama = nd['aciklama']?.toString().trim() ?? '';
-                    final etiket = aciklama.isNotEmpty
-                        ? 'Nakit Çıkış ($aciklama)'
-                        : 'Nakit Çıkış $sembol';
-                    return satir(
-                        etiket, '$sembol ${miktar.toStringAsFixed(2)}');
-                  }),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(vertical: 2),
+                      'Günlük Kasa Kalanı (TL)', fmt(d['gunlukKasaKalaniTL'])),
+                  if ((d['bankayaYatirilan'] as num? ?? 0) > 0)
+                    satir('Bankaya Yatırılan', fmt(d['bankayaYatirilan'])),
+                  if ((d['toplamAnaKasaHarcama'] as num? ?? 0) > 0)
+                    satir(
+                        'Ana Kasa Harcamalar', fmt(d['toplamAnaKasaHarcama'])),
+                  // TL nakit çıkış — toplam, açıklama yok
+                  if (((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
+                      .any((h) => (h['tutar'] as num? ?? 0) > 0))
+                    satir(
+                      'Nakit Çıkış',
+                      fmt(((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
+                          .where((h) => (h['tutar'] as num? ?? 0) > 0)
+                          .fold<double>(0.0,
+                              (s, h) => s + (h['tutar'] as num).toDouble())),
+                    ),
+                  pw.Divider(color: PdfColors.blue200),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 4),
+                    color: (_toDouble(d['anaKasaKalani']) >= 0)
+                        ? PdfColors.green700
+                        : PdfColors.red700,
                     child: pw.Row(
                       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                       children: [
-                        pw.Text(
-                          'Ana Kasa Kalanı',
-                          style: pw.TextStyle(font: fontBold, fontSize: 10),
-                        ),
-                        pw.Text(
-                          fmt(d['anaKasaKalani']),
-                          style: pw.TextStyle(
-                            font: fontBold,
-                            fontSize: 10,
-                            color: ((d['anaKasaKalani'] ?? 0) as num) >= 0
-                                ? PdfColors.green700
-                                : PdfColors.red700,
-                          ),
-                        ),
+                        pw.Text('Ana Kasa Kalanı',
+                            style: pw.TextStyle(
+                                font: fontBold,
+                                fontSize: 10,
+                                color: PdfColors.white)),
+                        pw.Text(fmt(d['anaKasaKalani']),
+                            style: pw.TextStyle(
+                                font: fontBold,
+                                fontSize: 10,
+                                color: PdfColors.white)),
                       ],
                     ),
                   ),
@@ -22550,62 +22896,44 @@ class _OzetEkraniState extends State<OzetEkrani> {
                         pw.Text(
                           '$sembol $t',
                           style: pw.TextStyle(
-                            font: fontBold,
-                            fontSize: 10,
-                            color: yaziRenk,
-                          ),
+                              font: fontBold, fontSize: 10, color: yaziRenk),
                         ),
                         pw.SizedBox(height: 2),
-                        satir(
-                          'Devreden Ana Kasa',
-                          '$sembol ${devreden.toStringAsFixed(2)}',
-                        ),
-                        satir(
-                          'Günlük Kasa Kalanı',
-                          '$sembol ${(dovizMiktarlari[t] ?? 0).toStringAsFixed(2)}',
-                        ),
+                        satir('Devreden Ana Kasa',
+                            '$sembol ${devreden.toStringAsFixed(2)}'),
+                        satir('Günlük Kasa Kalanı',
+                            '$sembol ${(dovizMiktarlari[t] ?? 0).toStringAsFixed(2)}'),
                         if (bankaYatan > 0)
+                          satir('Bankaya Yatırılan',
+                              '$sembol ${bankaYatan.toStringAsFixed(2)}'),
+                        // Nakit Çıkış — toplam, açıklama yok
+                        if (((d['nakitDovizler'] as List?)?.cast<Map>() ?? [])
+                            .any((nd) =>
+                                nd['cins'] == t &&
+                                (nd['miktar'] as num? ?? 0) > 0))
                           satir(
-                            'Bankaya Yatırılan',
-                            '$sembol ${bankaYatan.toStringAsFixed(2)}',
+                            'Nakit Çıkış',
+                            '$sembol ${((d['nakitDovizler'] as List?)?.cast<Map>() ?? []).where((nd) => nd['cins'] == t && (nd['miktar'] as num? ?? 0) > 0).fold<double>(0.0, (s, nd) => s + (nd['miktar'] as num).toDouble()).toStringAsFixed(2)}',
                           ),
-                        ...((d['nakitDovizler'] as List?)?.cast<Map>() ?? [])
-                            .where(
-                              (nd) =>
-                                  nd['cins'] == t &&
-                                  (nd['miktar'] as num? ?? 0) > 0,
-                            )
-                            .map(
-                              (nd) => satir(
-                                nd['aciklama']?.toString().isNotEmpty == true
-                                    ? nd['aciklama'].toString()
-                                    : 'Nakit Çıkış',
-                                '$sembol ${(nd['miktar'] as num).toStringAsFixed(2)}',
-                              ),
-                            ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.symmetric(vertical: 2),
+                        pw.SizedBox(height: 4),
+                        pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 4),
+                          color: kalan >= 0 ? kalanRenk : PdfColors.red700,
                           child: pw.Row(
                             mainAxisAlignment:
                                 pw.MainAxisAlignment.spaceBetween,
                             children: [
-                              pw.Text(
-                                'Ana Kasa Kalanı',
-                                style: pw.TextStyle(
-                                  font: fontBold,
-                                  fontSize: 10,
-                                  color: yaziRenk,
-                                ),
-                              ),
-                              pw.Text(
-                                '$sembol ${kalan.toStringAsFixed(2)}',
-                                style: pw.TextStyle(
-                                  font: fontBold,
-                                  fontSize: 10,
-                                  color:
-                                      kalan >= 0 ? kalanRenk : PdfColors.red700,
-                                ),
-                              ),
+                              pw.Text('Ana Kasa Kalanı',
+                                  style: pw.TextStyle(
+                                      font: fontBold,
+                                      fontSize: 10,
+                                      color: PdfColors.white)),
+                              pw.Text('$sembol ${kalan.toStringAsFixed(2)}',
+                                  style: pw.TextStyle(
+                                      font: fontBold,
+                                      fontSize: 10,
+                                      color: PdfColors.white)),
                             ],
                           ),
                         ),
@@ -23311,7 +23639,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
           baslik: 'KASA ÖZETİ',
           child: Column(
             children: [
-              // TL Kartı
+              // TL Kartı — Özet & Kapat ile birebir aynı
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding:
@@ -23333,18 +23661,18 @@ class _OzetEkraniState extends State<OzetEkrani> {
                                 fontSize: 13)),
                       ]),
                     ),
+                    // Banka Parası
                     Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Ekranda Görünen Nakit',
+                          const Text('Banka Parası',
                               style: TextStyle(
                                   fontSize: 12, color: Color(0xFF1976D2))),
-                          Text(_fmt(_toDouble(d['ekrandaGorunenNakit'])),
+                          Text(_fmt(_toDouble(d['bankaParasi'])),
                               style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF0288D1),
-                                  fontWeight: FontWeight.bold)),
+                                  fontSize: 12, color: Color(0xFF1565C0))),
                         ]),
+                    // Devreden Flot
                     if (devredenFlot > 0) ...[
                       const SizedBox(height: 2),
                       Row(
@@ -23358,6 +23686,21 @@ class _OzetEkraniState extends State<OzetEkrani> {
                                     fontSize: 12, color: Color(0xFF1565C0))),
                           ]),
                     ],
+                    // Harcamalar
+                    if (_toDouble(d['toplamHarcama']) > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Harcamalar',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF1976D2))),
+                            Text(_fmt(_toDouble(d['toplamHarcama'])),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF1565C0))),
+                          ]),
+                    ],
+                    // Günlük Flot
                     if (flotTutari > 0) ...[
                       const SizedBox(height: 2),
                       Row(
@@ -23371,6 +23714,19 @@ class _OzetEkraniState extends State<OzetEkrani> {
                                     fontSize: 12, color: Color(0xFF1565C0))),
                           ]),
                     ],
+                    // Toplam Nakit
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Toplam Nakit',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF1976D2))),
+                          Text(_fmt(_toDouble(d['toplamNakitTL'])),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0))),
+                        ]),
+                    // Kasa Farkı — renkli bant
                     if (kasaFarki.abs() >= 0.01) ...[
                       const SizedBox(height: 6),
                       Container(
@@ -23399,6 +23755,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
                       ),
                     ],
                     const Divider(height: 12, color: Color(0xFF90CAF9)),
+                    // Günlük Kasa Kalanı — sadece TL
                     Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -23660,30 +24017,30 @@ class _OzetEkraniState extends State<OzetEkrani> {
                                     fontSize: 12, color: Color(0xFF1565C0))),
                           ]),
                     ],
-                    // Nakit Çıkış TL kalemleri — açıklama varsa göster
-                    ...((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
-                        .where((h) => (h['tutar'] as num? ?? 0) > 0)
-                        .map((h) {
-                      final aciklama = (h['aciklama'] as String? ?? '').trim();
-                      final etiket = aciklama.isNotEmpty
-                          ? 'Nakit Çıkış ($aciklama)'
-                          : 'Nakit Çıkış TL';
-                      return Column(children: [
-                        const SizedBox(height: 2),
-                        Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                  child: Text(etiket,
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF1976D2)))),
-                              Text(_fmt((h['tutar'] as num).toDouble()),
-                                  style: const TextStyle(
-                                      fontSize: 12, color: Color(0xFF1565C0))),
-                            ]),
-                      ]);
-                    }),
+                    // Nakit Çıkış TL — toplam (açıklama yok, varsa göster)
+                    if (((d['nakitCikislar'] as List?)?.cast<Map>() ?? [])
+                        .any((h) => (h['tutar'] as num? ?? 0) > 0)) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Nakit Çıkış',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF1976D2))),
+                            Text(
+                              _fmt(((d['nakitCikislar'] as List?)
+                                          ?.cast<Map>() ??
+                                      [])
+                                  .where((h) => (h['tutar'] as num? ?? 0) > 0)
+                                  .fold<double>(
+                                      0.0,
+                                      (s, h) =>
+                                          s + (h['tutar'] as num).toDouble())),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF1565C0)),
+                            ),
+                          ]),
+                    ],
                     const Divider(height: 10, color: Color(0xFF90CAF9)),
                     // Ana Kasa Kalanı — yeşil/kırmızı bant
                     Container(
@@ -23714,7 +24071,7 @@ class _OzetEkraniState extends State<OzetEkrani> {
                   ],
                 ),
               ),
-              // Döviz Kartları — _anaKasaSection ile aynı renk paleti
+              // Döviz Kartları — _anaKasaSection ile aynı renk ve yapı
               ...dovizTurleri.where((t) {
                 final kalan = _toDouble(dovizKalanlar?[t]);
                 final devreden = _toDouble(oncekiDovizKalanlar?[t]);
@@ -23724,9 +24081,16 @@ class _OzetEkraniState extends State<OzetEkrani> {
                 final sembol = _sembol(t);
                 final kalan = _toDouble(dovizKalanlar?[t]);
                 final devreden = _toDouble(oncekiDovizKalanlar?[t]);
+                // Bankaya yatırılan — toplam
                 double bankaYatan = 0;
                 for (var bd in bankaDovizListesi) {
                   if (bd['cins'] == t) bankaYatan += _toDouble(bd['miktar']);
+                }
+                // Nakit çıkış — toplam (açıklama yok)
+                double nakitCikisToplam = 0;
+                for (var nd in nakitDovizListesi) {
+                  if (nd['cins'] == t)
+                    nakitCikisToplam += _toDouble(nd['miktar']);
                 }
                 final bgRenk = t == 'USD'
                     ? const Color(0xFFFFF8E1)
@@ -23802,34 +24166,21 @@ class _OzetEkraniState extends State<OzetEkrani> {
                                       TextStyle(fontSize: 12, color: yaziRenk)),
                             ]),
                       ],
-                      // Döviz nakit çıkış kalemleri
-                      ...nakitDovizListesi
-                          .where((nd) =>
-                              nd['cins'] == t &&
-                              (nd['miktar'] as num? ?? 0) > 0)
-                          .map((nd) {
-                        final aciklama =
-                            (nd['aciklama'] as String? ?? '').trim();
-                        final etiket = aciklama.isNotEmpty
-                            ? 'Nakit Çıkış ($aciklama)'
-                            : 'Nakit Çıkış $sembol';
-                        return Column(children: [
-                          const SizedBox(height: 2),
-                          Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                    child: Text(etiket,
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: yaziRenk.withOpacity(0.8)))),
-                                Text(
-                                    '$sembol ${(nd['miktar'] as num).toStringAsFixed(2)}',
-                                    style: TextStyle(
-                                        fontSize: 12, color: yaziRenk)),
-                              ]),
-                        ]);
-                      }),
+                      if (nakitCikisToplam > 0) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Nakit Çıkış',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: yaziRenk.withOpacity(0.8))),
+                              Text(
+                                  '$sembol ${nakitCikisToplam.toStringAsFixed(2)}',
+                                  style:
+                                      TextStyle(fontSize: 12, color: yaziRenk)),
+                            ]),
+                      ],
                       const Divider(height: 10),
                       Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
