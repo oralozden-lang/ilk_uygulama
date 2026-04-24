@@ -3206,6 +3206,24 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       if (!mounted) return;
       // Sadece gerçek sekme değişiminde tetikle
       if (_tabController.indexIsChanging) {
+        // Tab 2'ye (Günlük Kasa) gitmeden Pulse kontrol check
+        if (_tabController.index == 2 && _sonTabIndex == 1) {
+          if (!_pulseKontrolOnaylandi) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('❌ Pulse verilerini önce kontrol edin!'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 2),
+              ),
+            );
+            // Geri dön
+            Future.microtask(() {
+              _tabController.index = _sonTabIndex;
+            });
+            return;
+          }
+        }
+
         if (_tabController.index != _sonTabIndex) {
           _sonTabIndex = _tabController.index;
           setState(() {});
@@ -3271,6 +3289,24 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           });
           _kilitAl();
         });
+      });
+    }
+
+    // Pulse/MyDom verisi değişirse kontrol onayını sıfırla
+    for (var c in _pulseKiyasCtrl.values) {
+      c.addListener(() {
+        if (!mounted || _yukleniyor || _readOnly) return;
+        if (_pulseKontrolOnaylandi) {
+          setState(() => _pulseKontrolOnaylandi = false);
+        }
+      });
+    }
+    for (var c in _myDomKiyasCtrl.values) {
+      c.addListener(() {
+        if (!mounted || _yukleniyor || _readOnly) return;
+        if (_pulseKontrolOnaylandi) {
+          setState(() => _pulseKontrolOnaylandi = false);
+        }
       });
     }
   }
@@ -6526,6 +6562,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       confirmText: 'Seç',
     );
     if (picked != null && picked != _secilenTarih) {
+      // Eski tarihteki kaydedilmemiş değişiklikleri kaydet
+      if (_degisiklikVar) _anindaKaydet();
+
       await _kilitBirak();
       setState(() {
         _secilenTarih = picked;
@@ -6829,6 +6868,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               // Sadece o tarihe git — reddedildi henüz set edilmez
               final parcalar = retTarih.split('-');
               if (parcalar.length == 3) {
+                // Eski tarihteki kaydedilmemiş değişiklikleri kaydet
+                if (_degisiklikVar) _anindaKaydet();
+
                 final tarih = DateTime(
                   int.tryParse(parcalar[0]) ?? 2000,
                   int.tryParse(parcalar[1]) ?? 1,
@@ -7341,6 +7383,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         if (sonuc == 'goruntule' && mounted) {
           final parcalar = retTarih.split('-');
           if (parcalar.length == 3) {
+            // Eski tarihteki kaydedilmemiş değişiklikleri kaydet
+            if (_degisiklikVar) _anindaKaydet();
+
             final tarih = DateTime(
               int.tryParse(parcalar[0]) ?? 2000,
               int.tryParse(parcalar[1]) ?? 1,
