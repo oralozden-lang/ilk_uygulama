@@ -1551,7 +1551,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         : ElevatedButton.icon(
                             onPressed: _readOnly || _pulseOkunuyor
                                 ? null
-                                : _myDominosResmiOku,
+                                : () async {
+                                    final src = await _resimKaynagiSec(context);
+                                    if (src != null)
+                                      _myDominosResmiOku(source: src);
+                                  },
                             icon: Icon(
                                 _myDomOkundu
                                     ? Icons.check_circle
@@ -1589,7 +1593,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                         : ElevatedButton.icon(
                             onPressed: _readOnly || _myDominosOkunuyor
                                 ? null
-                                : _pulseResmiOku,
+                                : () async {
+                                    final src = await _resimKaynagiSec(context);
+                                    if (src != null)
+                                      _pulseResmiOku(source: src);
+                                  },
                             icon: Icon(
                                 _pulseOkundu
                                     ? Icons.check_circle
@@ -2475,7 +2483,153 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
 
   // ── Pulse Resmi Okuma ────────────────────────────────────────────────────────
 
-  Future<void> _pulseResmiOku() async {
+  // ── Resim kaynağı seç (Kamera / Galeri) ──────────────────────────────────
+  // ── Resim önizleme — gönder / yeniden çek ──────────────────────────────────
+  Future<bool> _resimOnizle(
+      BuildContext ctx, Uint8List bytes, String baslik) async {
+    final sonuc = await showDialog<bool>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(children: [
+                const Icon(Icons.image_search,
+                    color: Color(0xFF0288D1), size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(baslik,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15))),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text('Görüntü net mi? Yazılar okunuyor mu?',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.5,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: InteractiveViewer(
+                  minScale: 1.0,
+                  maxScale: 4.0,
+                  child: Image.memory(bytes, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('Parmakla büyütüp kontrol edebilirsiniz',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  textAlign: TextAlign.center),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(_, false),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('Yeniden Çek'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange[700],
+                      side: BorderSide(color: Colors.orange[300]!),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(_, true),
+                    icon: const Icon(Icons.send, size: 16),
+                    label: const Text('Gönder'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0288D1),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ],
+        ),
+      ),
+    );
+    return sonuc == true;
+  }
+
+  Future<ImageSource?> _resimKaynagiSec(BuildContext ctx) async {
+    return showModalBottomSheet<ImageSource>(
+      context: ctx,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFE0F2FE),
+                  child: Icon(Icons.camera_alt,
+                      color: Color(0xFF0288D1), size: 20),
+                ),
+                title: const Text('Kameradan Çek',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Ekrana tutun, fotoğraf çekin',
+                    style: TextStyle(fontSize: 12)),
+                onTap: () => Navigator.pop(_, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFF0FDF4),
+                  child: Icon(Icons.photo_library,
+                      color: Color(0xFF059669), size: 20),
+                ),
+                title: const Text('Galeriden Seç',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Ekran görüntüsü seçin',
+                    style: TextStyle(fontSize: 12)),
+                onTap: () => Navigator.pop(_, ImageSource.gallery),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pulseResmiOku(
+      {ImageSource source = ImageSource.gallery}) async {
     try {
       // Gemini API key Firestore'dan al
       final ayarDoc = await FirebaseFirestore.instance
@@ -2500,18 +2654,24 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       // Resim seç
       final picker = ImagePicker();
       final picked = await picker.pickImage(
-        source: ImageSource.gallery,
+        source: source,
         imageQuality: 60,
         maxWidth: 1200,
         maxHeight: 1600,
       );
       if (picked == null) return;
 
+      // Önizleme — net mi kontrolü
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      final gonder =
+          await _resimOnizle(context, bytes, 'Pulse Ekranı Önizleme');
+      if (!gonder) return; // Kullanıcı yeniden çek dedi
+
       setState(() => _pulseOkunuyor = true);
       if (!mounted) return;
 
       // Resmi base64'e çevir
-      final bytes = await picked.readAsBytes();
       final base64Image = base64Encode(bytes);
       final mimeType = picked.mimeType ?? 'image/jpeg';
 
@@ -2665,7 +2825,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           'Brüt Satış veya Genel Toplam';
 
       final prompt = """Bu bir Pulse POS/kasa programı ekran görüntüsü.
-Aşağıdaki verileri JSON formatında çıkar:
+ÖNCE iki kontrol yap:
+1. Resim yeterince net mi? Yazılar okunabiliyor mu? Net değilse döndür: {"hata": "Resim bulanık veya okunamıyor, daha yakın ve sabit tutarak tekrar çekin"}
+2. Resim gerçekten bir Pulse POS/kasa ekranı mı? Değilse döndür: {"hata": "Bu resim Pulse ekranı değil"}
+
+Pulse ekranıysa aşağıdaki verileri JSON formatında çıkar:
 - brutsatis: "$brutSatisPulseAdi" rakamı (sadece sayı)
 - bankapara: Banka Parası veya Kalan Nakit rakamı (sadece sayı)
 - kredikart: 01.KREDI KARTI veya Kredi Kartı toplamı (sadece sayı)
@@ -2791,6 +2955,53 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
       print('GEMINI PULSE YANIT: $cleanText');
       final Map<String, dynamic> geminiOkunan = jsonDecode(cleanText);
 
+      // Yanlış resim kontrolü
+      if (geminiOkunan.containsKey('hata')) {
+        setState(() => _pulseOkunuyor = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(children: [
+                const Icon(Icons.image_not_supported,
+                    color: Colors.white, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: Text(
+                  'Yanlış resim: ' +
+                      (geminiOkunan['hata'] as String? ?? '') +
+                      '\nLütfen Pulse ekran görüntüsü seçin.',
+                )),
+              ]),
+              backgroundColor: Colors.red[700],
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+        return;
+      }
+
+      // brutsatis hiç yoksa muhtemelen yanlış/boş resim
+      if (geminiOkunan['brutsatis'] == null &&
+          geminiOkunan['kredikart'] == null) {
+        setState(() => _pulseOkunuyor = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(children: [
+                Icon(Icons.warning_amber, color: Colors.white, size: 18),
+                SizedBox(width: 10),
+                Expanded(
+                    child: Text(
+                        'Pulse verisi bulunamadı.\nDoğru ekranı seçtiğinizden emin olun.')),
+              ]),
+              backgroundColor: Colors.orange[800],
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+        return;
+      }
+
       // Değerleri direkt uygula — setState dışında ctrl hazırla
       if (!mounted) return;
 
@@ -2913,7 +3124,8 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
   // ── My Dominos Resmi Okuma ───────────────────────────────────────────────────
 
-  Future<void> _myDominosResmiOku() async {
+  Future<void> _myDominosResmiOku(
+      {ImageSource source = ImageSource.gallery}) async {
     try {
       // Gemini API key Firestore'dan al
       final ayarDoc = await FirebaseFirestore.instance
@@ -2938,25 +3150,23 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
       // Resim seç
       final picker = ImagePicker();
       final picked = await picker.pickImage(
-        source: ImageSource.gallery,
+        source: source,
         imageQuality: 60,
         maxWidth: 1200,
         maxHeight: 1600,
       );
       if (picked == null) return;
 
-      setState(() => _myDominosOkunuyor = true);
-
+      // Önizleme — net mi kontrolü
+      final bytes = await picked.readAsBytes();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('My Dominos resmi okunuyor...'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      final gonder = await _resimOnizle(context, bytes, 'My Dominos Önizleme');
+      if (!gonder) return; // Kullanıcı yeniden çek dedi
+
+      setState(() => _myDominosOkunuyor = true);
+      if (!mounted) return;
 
       // Resmi base64'e çevir
-      final bytes = await picked.readAsBytes();
       final base64Image = base64Encode(bytes);
       final mimeType = picked.mimeType ?? 'image/jpeg';
 
@@ -3052,6 +3262,11 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
       // ÖNEMLİ: Gemini ekranda GÖRDÜĞÜ ham adı döndürür, sistem adını değil.
       // Eşleştirme myDomFuzzyBul ile kodda yapılır — ad değişikliği okumayı etkilemez.
       final prompt = """Bu bir My Dominos sipariş dökümü ekran görüntüsü.
+ÖNCE iki kontrol yap:
+1. Resim yeterince net mi? Yazılar okunabiliyor mu? Net değilse döndür: {"hata": "Resim bulanık veya okunamıyor, daha yakın ve sabit tutarak tekrar çekin"}
+2. Resim gerçekten My Dominos uygulaması/sitesinden bir sipariş/satış raporu mu? Değilse döndür: {"hata": "Bu resim My Dominos ekranı değil"}
+
+My Dominos ekranıysa:
 Sadece "Online Kredi" veya "Banka Kartı" içeren satırların Ciro değerlerini al.
 Nakit, Metropol Kart, Pluxee gibi yemek kartı satırlarını alma.
 
@@ -3165,6 +3380,31 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
       final cleanText = text.replaceAll(RegExp(r'```json|```'), '').trim();
       final Map<String, dynamic> okunan = jsonDecode(cleanText);
+
+      // Yanlış resim kontrolü
+      if (okunan.containsKey('hata')) {
+        setState(() => _myDominosOkunuyor = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(children: [
+                const Icon(Icons.image_not_supported,
+                    color: Colors.white, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: Text(
+                  'Yanlış resim: ' +
+                      (okunan['hata'] as String? ?? '') +
+                      '\nLütfen My Dominos ekran görüntüsü seçin.',
+                )),
+              ]),
+              backgroundColor: Colors.red[700],
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+        return;
+      }
 
       final Map<String, double> yeniOkunan = {};
       if (okunan['online'] != null) {
@@ -7881,7 +8121,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _readOnly ? null : _pulseResmiOku,
+                  onPressed: _readOnly
+                      ? null
+                      : () async {
+                          final src = await _resimKaynagiSec(context);
+                          if (src != null) _pulseResmiOku(source: src);
+                        },
                   icon: const Icon(Icons.camera_alt_outlined, size: 16),
                   label:
                       const Text('Pulse Resmi', style: TextStyle(fontSize: 12)),
