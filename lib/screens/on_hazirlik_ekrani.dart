@@ -1118,11 +1118,94 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   }
 
   // ── Chip sekme yardımcısı ────────────────────────────────────────────────────
+  static const _sekmeRenkleri = {
+    'POS & Y. Kartı': Color(0xFF0288D1),
+    'Pulse / My Dom.': Color(0xFF7C3AED),
+    'Günlük Kasa': Color(0xFF059669),
+    'Ana Kasa': Color(0xFFB45309),
+    'Transfer/D. Alım': Color(0xFFDC2626),
+    'Özet & Kapat': Color(0xFF0F766E),
+  };
+
+  static const _sekmeAcikRenkleri = {
+    'POS & Y. Kartı': Color(0xFFE0F2FE),
+    'Pulse / My Dom.': Color(0xFFEDE9FE),
+    'Günlük Kasa': Color(0xFFD1FAE5),
+    'Ana Kasa': Color(0xFFFEF3C7),
+    'Transfer/D. Alım': Color(0xFFFEE2E2),
+    'Özet & Kapat': Color(0xFFCCFBF1),
+  };
+
+  static const _sekmeIkonlar = {
+    'POS & Y. Kartı': Icons.credit_card,
+    'Pulse / My Dom.': Icons.bar_chart,
+    'Günlük Kasa': Icons.account_balance_wallet,
+    'Ana Kasa': Icons.account_balance,
+    'Transfer/D. Alım': Icons.swap_horiz,
+    'Özet & Kapat': Icons.check_circle_outline,
+  };
+
   Widget _chipTab(String label) {
+    final labels = [
+      'POS & Y. Kartı',
+      'Pulse / My Dom.',
+      'Günlük Kasa',
+      'Ana Kasa',
+      'Transfer/D. Alım',
+      'Özet & Kapat'
+    ];
+    final isActive = _tabController.index == labels.indexOf(label);
+    final renk = _sekmeRenkleri[label] ?? const Color(0xFF0288D1);
+    final acikRenk = _sekmeAcikRenkleri[label] ?? const Color(0xFFE0F2FE);
+    final ikon = _sekmeIkonlar[label] ?? Icons.circle;
+    // Kısa etiket — sekme adından al
+    final kisaEtiket = label
+        .replaceAll('& Y. Kartı', '& Y.K.')
+        .replaceAll('/ My Dom.', '/ MyDom')
+        .replaceAll('/D. Alım', '/D.Alım');
     return Tab(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        child: Text(label),
+      height: 60,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive ? acikRenk : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isActive ? renk.withOpacity(0.35) : Colors.transparent,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: isActive ? renk : const Color(0xFFE2E8F0),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                ikon,
+                size: 15,
+                color: isActive ? Colors.white : const Color(0xFF94A3B8),
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              kisaEtiket,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                color: isActive ? renk : const Color(0xFF64748B),
+                height: 1.1,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1198,12 +1281,23 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     void eksikAlanlariGoster() {
       final eksikler = <String>[];
       if (!_pulseKontrolOnaylandi) eksikler.add('Pulse kontrolü onaylanmamış');
+      if (_pulseBankaParasi < -0.01)
+        eksikler.add(
+            'Pulse/MyDom Banka Parası negatif (${_formatTL(_pulseBankaParasi)})');
       if (_parseDouble(_gunlukSatisCtrl.text) <= 0)
         eksikler.add('Günlük Satış Toplamı girilmemiş');
       if (_toplamPos <= 0) eksikler.add('POS tutarı girilmemiş');
       if (_toplamNakitTL <= 0) eksikler.add('Nakit sayım yapılmamış');
       if (_bankaParasi <= 0) eksikler.add('Banka Parası hesaplanmamış');
       if (_dovizLimitiAsildi) eksikler.add('Döviz limiti aşılmış');
+      // Döviz eklenmiş ama kur girilmemiş → kapanışa engel
+      final kurEksikDoviz = _dovizler.where((d) {
+        final kur = _parseDouble((d['kurCtrl'] as TextEditingController).text);
+        return kur <= 0;
+      }).toList();
+      if (kurEksikDoviz.isNotEmpty)
+        eksikler.add(
+            'Döviz KUR bilgisi girilmemiş (${kurEksikDoviz.map((d) => d['cins'] ?? 'Döviz').join(', ')})');
       if (!_internetVar) eksikler.add('İnternet bağlantısı yok');
 
       showDialog(
@@ -1738,14 +1832,18 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                             final pulseVal = _parseDouble(pulseCtrl.text);
                             final progDolu =
                                 isPosOrYemek ? myDomVal > 0 : progVal > 0;
+                            final pulseValDolu = pulseVal > 0;
                             final pulseDolu = pulseCtrl.text.isNotEmpty;
                             final fark = progVal - pulseVal;
                             // Eşleşme: her ikisi dolu ve fark yok
+                            // VEYA her ikisi de 0/boş (program boş, pulse da 0)
                             final eslesme =
-                                pulseDolu && progDolu && fark.abs() < 0.01;
+                                (pulseDolu && progDolu && fark.abs() < 0.01) ||
+                                    (!progDolu && !pulseValDolu);
                             // Fark: biri dolu biri farklı/boş → her durumda göster
                             // (Pulse>0 prog=0, prog>0 pulse=0, her ikisi farklı)
-                            final farkVar = (pulseDolu || progDolu) && !eslesme;
+                            final farkVar =
+                                (pulseValDolu || progDolu) && !eslesme;
 
                             // Sol şerit rengi: eşleşme=yeşil, fark=kırmızı, boş=gri
                             final seritRenk = eslesme
@@ -2005,9 +2103,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                                         CrossAxisAlignment.end,
                                                     children: [
                                                         Text(
-                                                          fark > 0
-                                                              ? '+${_formatTL(fark).replaceAll(' ₺', '')}'
-                                                              : '−${_formatTL(fark.abs()).replaceAll(' ₺', '')}',
+                                                          fark.abs() < 0.01
+                                                              ? '0,00'
+                                                              : fark > 0
+                                                                  ? '+${_formatTL(fark).replaceAll(' ₺', '')}'
+                                                                  : '−${_formatTL(fark.abs()).replaceAll(' ₺', '')}',
                                                           style: TextStyle(
                                                               fontSize: 10,
                                                               fontWeight:
@@ -2065,7 +2165,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                                               ? _formatTL(hedef)
                                                                   .replaceAll(
                                                                       ' ₺', '')
-                                                              : '';
+                                                              : '0';
                                                           _eskiPulseDegler
                                                               .remove(pulseKey);
                                                           _eskiMyDomDegler
@@ -2128,10 +2228,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           final pulse = _parseDouble(pc.text);
                           final progD = ipoy ? mdv > 0 : prog > 0;
                           final pulseD = pc.text.isNotEmpty;
+                          final pulseV = pulse > 0;
                           final f = prog - pulse;
+                          // Her ikisi de 0/boş: program=tire(0), pulse=0 → Girilmemiş
+                          final herIkisiSifir = !progD && !pulseV;
                           if (!progD && !pulseD)
                             girilmemisSayisi++;
-                          else if (progD && pulseD && f.abs() < 0.01)
+                          else if (herIkisiSifir)
+                            girilmemisSayisi++; // program=-, pulse=0 → eşit/girilmemiş
+                          else if ((progD || pulseV) && f.abs() < 0.01)
                             eslesiyorSayisi++;
                           else
                             farkSayisi++; // her iki yönde fark (pulse>0 prog=0 dahil)
@@ -2236,6 +2341,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                     : Builder(builder: (bctx) {
                         // Fark sayısını hesapla
                         int yeniFarkSayisi = 0;
+                        int toplamKalem = 0;
                         for (final k in tumKalemler) {
                           final adL = (k['ad'] as String).toLowerCase();
                           if (adL.contains('brüt') || adL.contains('brut'))
@@ -2265,38 +2371,53 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           // POS/Yemek: program=0 ise o gün kullanılmamış → saymaz
                           // Her iki yönde fark say:
                           // prog>0 pulse farklı/boş, pulse>0 prog=0
+                          // solDeger ve sagDeger ikisi de 0 ise eşit say (program=tire, pulse=0)
+                          final solSifir = solDeger.abs() < 0.01;
+                          final sagSifir = sagDeger.abs() < 0.01;
                           final herBiriBos = !solDoluF && !sagDoluF;
-                          if (!herBiriBos) {
+                          final herIkisiSifir =
+                              solSifir && sagSifir; // - ile 0 → eşit
+                          if (!herBiriBos && !herIkisiSifir) {
                             final eslesF = solDoluF &&
                                 sagDoluF &&
                                 (sagDeger - solDeger).abs() < 0.01;
                             if (!eslesF) yeniFarkSayisi++;
                           }
+                          if (!herBiriBos && !herIkisiSifir) toplamKalem++;
                         }
-                        // Eşitlik bozulduysa onayı otomatik sıfırla
-                        if (_pulseKontrolOnaylandi && yeniFarkSayisi > 0) {
+                        // Aktif: fark yok VE en az bir kayıt işlenmiş VE Banka Parası negatif değil
+                        // Pasif: fark var VEYA hiç kayıt yok VEYA Banka Parası < 0
+                        final bankaParasiNegatif = _pulseBankaParasi < -0.01;
+                        // Eşitlik bozulduysa veya Banka Parası negatifse onayı otomatik sıfırla
+                        if (_pulseKontrolOnaylandi &&
+                            (yeniFarkSayisi > 0 || bankaParasiNegatif)) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted && _pulseKontrolOnaylandi) {
                               setState(() => _pulseKontrolOnaylandi = false);
                             }
                           });
                         }
-                        // Aktif: fark yok → onaylanabilir
-                        // Pasif: fark var → tüm farklar kapatılmalı
-                        final butonAktif = yeniFarkSayisi == 0 && !_readOnly;
+                        final butonAktif = yeniFarkSayisi == 0 &&
+                            toplamKalem > 0 &&
+                            !bankaParasiNegatif &&
+                            !_readOnly;
                         return Tooltip(
-                          message: yeniFarkSayisi > 0
-                              ? '$yeniFarkSayisi kalemde fark var — tüm farkları kapatın'
-                              : '',
+                          message: bankaParasiNegatif
+                              ? 'Banka Parası negatif — onay verilemez'
+                              : yeniFarkSayisi > 0
+                                  ? '$yeniFarkSayisi kalemde fark var — tüm farkları kapatın'
+                                  : '',
                           child: ElevatedButton.icon(
                             onPressed: butonAktif
                                 ? () => setState(
                                     () => _pulseKontrolOnaylandi = true)
                                 : null,
                             icon: const Icon(Icons.check_circle_outline),
-                            label: Text(yeniFarkSayisi > 0
-                                ? '$yeniFarkSayisi kalemde fark var'
-                                : 'Pulse\'u kontrol ettim, veriler doğru'),
+                            label: Text(bankaParasiNegatif
+                                ? 'Banka Parası negatif!'
+                                : yeniFarkSayisi > 0
+                                    ? '$yeniFarkSayisi kalemde fark var'
+                                    : 'Pulse\'u kontrol ettim, veriler doğru'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: butonAktif
                                   ? Colors.orange[700]
@@ -2571,7 +2692,7 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
       // Gemini API isteği — 503 olursa 1 kez retry
       late http.Response response;
-      for (int deneme = 1; deneme <= 2; deneme++) {
+      for (int deneme = 1; deneme <= 3; deneme++) {
         try {
           response = await http.post(
             Uri.parse(
@@ -2614,29 +2735,33 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
           return;
         }
 
-        if (response.statusCode == 503 && deneme == 1) {
-          // 503 → kullanıcıya bildir, 5 saniye bekle, tekrar dene
+        if (response.statusCode == 503 && deneme < 3) {
+          final bekleme = deneme == 1 ? 5 : 10;
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Sunucu meşgul, tekrar deneniyor...'),
+              SnackBar(
+                content: Text(
+                    'Sunucu meşgul, $bekleme sn sonra tekrar deneniyor... ($deneme/3)'),
                 backgroundColor: Colors.orange,
-                duration: Duration(seconds: 4),
+                duration: Duration(seconds: bekleme),
               ),
             );
           }
-          await Future.delayed(const Duration(seconds: 5));
+          await Future.delayed(Duration(seconds: bekleme));
           continue;
         }
-        break; // Başarılı veya 503 dışı hata
+        break; // Başarılı veya son deneme
       }
 
       if (response.statusCode != 200) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('API hatası: ${response.statusCode}'),
+              content: Text(response.statusCode == 503
+                  ? 'Sunucu şu an meşgul. İptal edip manuel girebilirsiniz.'
+                  : 'API hatası: ${response.statusCode}'),
               backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
             ),
           );
         }
@@ -2946,7 +3071,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       }
 
       late http.Response response;
-      for (int deneme = 1; deneme <= 2; deneme++) {
+      for (int deneme = 1; deneme <= 3; deneme++) {
         try {
           response = await http.post(
             Uri.parse(
@@ -2987,17 +3112,19 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           return;
         }
 
-        if (response.statusCode == 503 && deneme == 1) {
+        if (response.statusCode == 503 && deneme < 3) {
+          final bekleme = deneme == 1 ? 5 : 10;
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Sunucu meşgul, tekrar deneniyor...'),
+              SnackBar(
+                content: Text(
+                    'Sunucu meşgul, $bekleme sn sonra tekrar deneniyor... ($deneme/3)'),
                 backgroundColor: Colors.orange,
-                duration: Duration(seconds: 4),
+                duration: Duration(seconds: bekleme),
               ),
             );
           }
-          await Future.delayed(const Duration(seconds: 5));
+          await Future.delayed(Duration(seconds: bekleme));
           continue;
         }
         break;
@@ -3009,8 +3136,11 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('API hatası: ${response.statusCode}'),
+              content: Text(response.statusCode == 503
+                  ? 'Sunucu şu an meşgul. İptal edip manuel girebilirsiniz.'
+                  : 'API hatası: ${response.statusCode}'),
               backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
             ),
           );
         }
@@ -4928,22 +5058,23 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         _pulseKiyasCtrl[e.key]!.text = e.value.toString();
       }
       // My Dominos kıyas verileri yükle
-      // ÖNEMLI: Firestore'dan gelen myDomKiyasVerileri sadece manuel girişlerdir,
-      // otomatik okunan verileri içermez. Otomatik okunan veriler sadece
-      // _pulseOkundu/myDomOkundu flag'ları ile tanımlanır.
       final myDomKiyas =
           (data['myDomKiyasVerileri'] as Map<String, dynamic>?) ?? {};
-      for (var e in myDomKiyas.entries) {
-        _myDomKiyasCtrl.putIfAbsent(e.key, () => TextEditingController());
-        _myDomKiyasCtrl[e.key]!.text = e.value.toString();
-        // Not: _myDominosOkunan map'ine YAZILMIYOR çünkü bu veriler manuel giriş
-        // Otomatik okunan veriler yalnızca _myDomOkundu=true olduğunda
-        // _myDominosResmiOku() tarafından set edilir.
-      }
-      if (myDomKiyas.isNotEmpty) _myDominosYuklendi = true;
       _pulseKontrolOnaylandi = data['pulseKontrolOnaylandi'] == true;
       _pulseOkundu = data['pulseResmiOkundu'] == true;
       _myDomOkundu = data['myDomResmiOkundu'] == true;
+      for (var e in myDomKiyas.entries) {
+        _myDomKiyasCtrl.putIfAbsent(e.key, () => TextEditingController());
+        _myDomKiyasCtrl[e.key]!.text = e.value.toString();
+        // FIX: Resim daha önce okunmuşsa _myDominosOkunan'ı da doldur.
+        // Tarih değiştirince _myDominosOkunan temizleniyor ama _myDomOkundu=true
+        // kalıyordu; eşleştirme mantığı containsKey false bulup yanlış daldan
+        // hesaplıyordu. Flag'ı önce set edip buraya yazarak tutarlılık sağlanır.
+        if (_myDomOkundu) {
+          _myDominosOkunan[e.key] = _parseDouble(e.value.toString());
+        }
+      }
+      if (myDomKiyas.isNotEmpty) _myDominosYuklendi = true;
       // Yeni yüklenen ctrl'lere listener bağla
       for (var c in _pulseKiyasCtrl.values) _pulseCtrlBagla(c);
       for (var c in _myDomKiyasCtrl.values) _pulseCtrlBagla(c);
@@ -5158,6 +5289,96 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     if (decPart == '00') return buffer.toString();
     return '${buffer.toString()},$decPart';
   }
+
+  // ── Aktif sekmeyi temizle ───────────────────────────────────────────────────
+  Future<void> _aktifSekmeTemizle() async {
+    final sekme = _tabController.index;
+    setState(() {
+      switch (sekme) {
+        case 0: // POS & Y. Kartı
+          for (var p in _posListesi) p.dispose();
+          _posListesi.clear();
+          _posListesi.add(PosGirisi(ad: 'POS 1'));
+          _sistemPosCtrl.clear();
+          for (var y in _yemekKartlari) y.dispose();
+          _yemekKartlari.clear();
+          if (_yemekKartiCinsleri.isNotEmpty)
+            _yemekKartlari
+                .add(YemekKartiGirisi(cins: _yemekKartiCinsleri.first));
+          for (var c in _sistemYemekKartiCtrl.values) c.clear();
+          for (var o in _onlineOdemeler)
+            (o['ctrl'] as TextEditingController).clear();
+          _gunlukSatisCtrl.clear();
+          break;
+        case 1: // Pulse / My Dom.
+          for (var c in _pulseKiyasCtrl.values) c.clear();
+          for (var c in _myDomKiyasCtrl.values) c.clear();
+          _myDominosOkunan.clear();
+          _myDominosYuklendi = false;
+          _pulseOkundu = false;
+          _myDomOkundu = false;
+          _pulseKontrolOnaylandi = false;
+          _okumaMesaji = '';
+          _pulseBankaParasi = 0;
+          break;
+        case 2: // Günlük Kasa
+          for (var h in _harcamalar) h.dispose();
+          _harcamalar.clear();
+          _harcamalar.add(HarcamaGirisi());
+          for (var c in _banknotCtrl.values) c.clear();
+          _manuelFlotCtrl.clear();
+          _ekrandaGorunenNakitCtrl.clear();
+          for (var d in _dovizler) {
+            (d['miktarCtrl'] as TextEditingController).dispose();
+            (d['kurCtrl'] as TextEditingController).dispose();
+          }
+          _dovizler.clear();
+          for (var c in _dovizBankayaYatiranCtrl.values) c.clear();
+          break;
+        case 3: // Ana Kasa
+          for (var h in _anaKasaHarcamalari) h.dispose();
+          _anaKasaHarcamalari.clear();
+          _anaKasaHarcamalari.add(HarcamaGirisi());
+          for (var h in _nakitCikislar) h.dispose();
+          _nakitCikislar.clear();
+          _nakitCikislar.add(HarcamaGirisi());
+          for (var d in _nakitDovizler) {
+            (d['ctrl'] as TextEditingController).dispose();
+            (d['aciklamaCtrl'] as TextEditingController?)?.dispose();
+          }
+          _nakitDovizler.clear();
+          for (var d in _bankaDovizler)
+            (d['ctrl'] as TextEditingController).dispose();
+          _bankaDovizler.clear();
+          _bankayaYatiranCtrl.clear();
+          break;
+        case 4: // Transfer / D. Alım
+          for (var t in _transferler) {
+            (t['aciklamaCtrl'] as TextEditingController).dispose();
+            (t['tutarCtrl'] as TextEditingController).dispose();
+          }
+          _transferler.clear();
+          for (var t in _digerAlimlar) {
+            (t['aciklamaCtrl'] as TextEditingController).dispose();
+            (t['tutarCtrl'] as TextEditingController).dispose();
+          }
+          _digerAlimlar.clear();
+          break;
+        case 5: // Özet & Kapat — temizlenecek veri yok
+          break;
+      }
+      _degisiklikVar = true;
+    });
+  }
+
+  static const _sekmeAdlari = [
+    'POS & Y. Kartı',
+    'Pulse / My Dom.',
+    'Günlük Kasa',
+    'Ana Kasa',
+    'Transfer/D. Alım',
+    'Özet & Kapat',
+  ];
 
   Future<void> _formlariTemizle() async {
     final bugun = _bugunuHesapla();
@@ -5668,7 +5889,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
   }
 
   double _parseDouble(String s) =>
-      double.tryParse(s.replaceAll('.', '').replaceAll(',', '.')) ?? 0;
+      double.tryParse(
+          s.replaceAll(' ', '').replaceAll('.', '').replaceAll(',', '.')) ??
+      0;
   int _parseInt(String s) => int.tryParse(s) ?? 0;
   String _formatTL(double val) {
     final parts = val.toStringAsFixed(2).split('.');
@@ -6910,6 +7133,66 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // Transferler bölümü başlığı — mor/indigo
+  Widget _sectionTitleTransfer(String title, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0F0FF),
+          borderRadius: BorderRadius.circular(8),
+          border: const Border(
+              left: BorderSide(color: Color(0xFF4F46E5), width: 4)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFF4F46E5), size: 20),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF4F46E5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Diğer Alımlar bölümü başlığı — amber/turuncu
+  Widget _sectionTitleDigerAlim(String title, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(8),
+          border: const Border(
+              left: BorderSide(color: Color(0xFFD97706), width: 4)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFFD97706), size: 20),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFD97706),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -8276,6 +8559,11 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    TextButton.icon(
+                      onPressed: _readOnly ? null : () => _dovizEkle(),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Döviz Ekle'),
+                    ),
                     const Text(
                       'Döviz',
                       style: TextStyle(
@@ -8283,11 +8571,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                         fontSize: 14,
                         color: Color(0xFF5B21B6),
                       ),
-                    ),
-                    TextButton.icon(
-                      onPressed: _readOnly ? null : () => _dovizEkle(),
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Döviz Ekle'),
                     ),
                   ],
                 ),
@@ -9008,7 +9291,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _sectionTitle('Transferler', Icons.swap_horiz),
+            _sectionTitleTransfer('Transferler', Icons.swap_horiz),
             ..._transferler.asMap().entries.map((e) {
               final idx = e.key;
               final t = e.value;
@@ -9725,7 +10008,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _sectionTitle('Diğer Alımlar', Icons.shopping_bag_outlined),
+            _sectionTitleDigerAlim(
+                'Diğer Alımlar', Icons.shopping_bag_outlined),
             ..._digerAlimlar.asMap().entries.map((e) {
               int idx = e.key;
               Map<String, dynamic> t = e.value;
@@ -11445,11 +11729,39 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               icon: const Icon(Icons.more_vert),
               onSelected: (value) {
                 switch (value) {
+                  case 'sekme_temizle':
+                    final sekmeAd = _sekmeAdlari[_tabController.index];
+                    showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: Text('$sekmeAd Temizle'),
+                        content: Text(
+                          '"$sekmeAd" sekmesindeki veriler silinecek. Emin misiniz?',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('İptal'),
+                          ),
+                          TextButton(
+                            onPressed: () async {
+                              Navigator.pop(context);
+                              await _aktifSekmeTemizle();
+                            },
+                            child: const Text(
+                              'Temizle',
+                              style: TextStyle(color: Color(0xFFB45309)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                    break;
                   case 'temizle':
                     showDialog(
                       context: context,
                       builder: (_) => AlertDialog(
-                        title: const Text('Formu Temizle'),
+                        title: const Text('Tümünü Temizle'),
                         content: const Text(
                           'Tüm girilen veriler silinecek. Emin misiniz?',
                         ),
@@ -11499,13 +11811,29 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                 if ((_bugunSecili || _duzenlemeAcik || !_gunuKapatildi) &&
                     !_readOnly)
                   PopupMenuItem(
+                    value: 'sekme_temizle',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.cleaning_services_outlined,
+                            color: Color(0xFFB45309)),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Sayfayı Temizle (${_sekmeAdlari[_tabController.index]})',
+                          style: const TextStyle(color: Color(0xFFB45309)),
+                        ),
+                      ],
+                    ),
+                  ),
+                if ((_bugunSecili || _duzenlemeAcik || !_gunuKapatildi) &&
+                    !_readOnly)
+                  PopupMenuItem(
                     value: 'temizle',
                     child: const Row(
                       children: [
-                        Icon(Icons.delete_outline, color: Colors.red),
+                        Icon(Icons.delete_sweep_outlined, color: Colors.red),
                         SizedBox(width: 12),
                         Text(
-                          'Formu Temizle',
+                          'Tümünü Temizle',
                           style: TextStyle(color: Colors.red),
                         ),
                       ],
@@ -11779,11 +12107,11 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                      color: const Color(0xFF0288D1), width: 1),
+                                      color: const Color(0xFFCBD5E1), width: 1),
                                   color: Colors.white,
                                 ),
                                 child: const Icon(Icons.chevron_left,
-                                    size: 18, color: Color(0xFF0288D1)),
+                                    size: 18, color: Color(0xFF64748B)),
                               ),
                             ),
                             const SizedBox(width: 4),
@@ -11793,26 +12121,27 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 controller: _tabController,
                                 isScrollable: true,
                                 tabAlignment: TabAlignment.start,
-                                indicator: BoxDecoration(
-                                  color: const Color(0xFF0288D1),
-                                  borderRadius: BorderRadius.circular(20),
+                                indicator: const BoxDecoration(
+                                  color: Colors.transparent,
                                 ),
                                 indicatorSize: TabBarIndicatorSize.tab,
                                 dividerColor: Colors.transparent,
-                                labelColor: Colors.white,
-                                unselectedLabelColor: const Color(0xFF0288D1),
-                                labelStyle: const TextStyle(
-                                    fontSize: 12, fontWeight: FontWeight.bold),
+                                labelColor: Colors.transparent,
+                                unselectedLabelColor: Colors.transparent,
+                                labelStyle: const TextStyle(fontSize: 10),
                                 unselectedLabelStyle:
-                                    const TextStyle(fontSize: 12),
-                                splashBorderRadius: BorderRadius.circular(20),
-                                padding: EdgeInsets.zero,
+                                    const TextStyle(fontSize: 10),
+                                splashBorderRadius: BorderRadius.circular(10),
+                                overlayColor:
+                                    WidgetStateProperty.all(Colors.transparent),
+                                padding:
+                                    const EdgeInsets.only(bottom: 4, top: 4),
                                 tabs: [
                                   _chipTab('POS & Y. Kartı'),
                                   _chipTab('Pulse / My Dom.'),
                                   _chipTab('Günlük Kasa'),
                                   _chipTab('Ana Kasa'),
-                                  _chipTab('Transfer'),
+                                  _chipTab('Transfer/D. Alım'),
                                   _chipTab('Özet & Kapat'),
                                 ],
                               ),
@@ -11833,11 +12162,11 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                      color: const Color(0xFF0288D1), width: 1),
+                                      color: const Color(0xFFCBD5E1), width: 1),
                                   color: Colors.white,
                                 ),
                                 child: const Icon(Icons.chevron_right,
-                                    size: 18, color: Color(0xFF0288D1)),
+                                    size: 18, color: Color(0xFF64748B)),
                               ),
                             ),
                           ],
