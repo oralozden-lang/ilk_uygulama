@@ -93,6 +93,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       {}; // Pulse manuel giriş
   final Map<String, TextEditingController> _myDomKiyasCtrl =
       {}; // MyDom manuel giriş
+  final Set<TextEditingController> _pulseCtrlListenerli =
+      {}; // Listener eklenmiş Pulse ctrl'leri (dedup)
   List<Map<String, dynamic>> _pulseKalemleri = []; // tip: pulseKalemi
   List<String> _onlineOdemeAdlari = []; // Firestore'dan yüklenir
   final TextEditingController _sistemPosCtrl = TextEditingController();
@@ -175,24 +177,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       if (!mounted) return;
       // Sadece gerçek sekme değişiminde tetikle
       if (_tabController.indexIsChanging) {
-        // Tab 2'ye (Günlük Kasa) gitmeden Pulse kontrol check
-        if (_tabController.index == 2 && _sonTabIndex == 1) {
-          if (!_pulseKontrolOnaylandi) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('❌ Pulse verilerini önce kontrol edin!'),
-                backgroundColor: Colors.orange,
-                duration: Duration(seconds: 2),
-              ),
-            );
-            // Geri dön
-            Future.microtask(() {
-              _tabController.index = _sonTabIndex;
-            });
-            return;
-          }
-        }
-
         if (_tabController.index != _sonTabIndex) {
           _sonTabIndex = _tabController.index;
           setState(() {});
@@ -261,23 +245,26 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       });
     }
 
-    // Pulse/MyDom verisi değişirse kontrol onayını sıfırla
-    for (var c in _pulseKiyasCtrl.values) {
-      c.addListener(() {
-        if (!mounted || _yukleniyor || _readOnly) return;
-        if (_pulseKontrolOnaylandi) {
-          setState(() => _pulseKontrolOnaylandi = false);
-        }
+    // Mevcut Pulse/MyDom ctrl'lerine listener bağla
+    for (var c in _pulseKiyasCtrl.values) _pulseCtrlBagla(c);
+    for (var c in _myDomKiyasCtrl.values) _pulseCtrlBagla(c);
+  }
+
+  // Pulse/balance etkileyen ctrl'lere değişiklik + onay-reset listener ekle (dedup)
+  void _pulseCtrlBagla(TextEditingController ctrl) {
+    if (_pulseCtrlListenerli.contains(ctrl)) return;
+    _pulseCtrlListenerli.add(ctrl);
+    ctrl.addListener(() {
+      if (!mounted || _yukleniyor || _readOnly) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _degisiklikVar = true;
+          if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
+        });
+        _kilitAl();
       });
-    }
-    for (var c in _myDomKiyasCtrl.values) {
-      c.addListener(() {
-        if (!mounted || _yukleniyor || _readOnly) return;
-        if (_pulseKontrolOnaylandi) {
-          setState(() => _pulseKontrolOnaylandi = false);
-        }
-      });
-    }
+    });
   }
 
   // Açılışta kapanmamış ilk günü bul ve oraya git
@@ -653,7 +640,13 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   Future<void> _otomatikKaydet() async {
     if (_readOnly || !_degisiklikVar || _otomatikKaydediliyor) return;
     if (!mounted) return;
-    setState(() => _otomatikKaydediliyor = true);
+    // _degisiklikVar async bekleme ÖNCE sıfırla — kayıt sırasında gelen
+    // yeni değişiklik (ör. Eşleştir) onu tekrar true yapar ve kayıt sonrası
+    // yakalanır. Sıfırlamayı await sonrasına bırakmak race condition yaratır.
+    setState(() {
+      _otomatikKaydediliyor = true;
+      _degisiklikVar = false;
+    });
     if (mounted) _appBarMesajGoster('⏳ Kaydediliyor...');
     try {
       final tarihKey = _tarihKey(_secilenTarih);
@@ -665,18 +658,20 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           .doc(tarihKey)
           .set(data, SetOptions(merge: true));
       if (mounted) {
-        setState(() => _degisiklikVar = false);
         _appBarMesajGoster('✓ Kaydedildi');
         await _kilitBirak();
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _degisiklikVar = true); // Hata durumunda geri al
         _appBarMesajGoster('✗ Kayıt Hatası: $e');
         // ignore: avoid_print
         print('KAYIT HATASI: $e');
       }
     } finally {
       if (mounted) setState(() => _otomatikKaydediliyor = false);
+      // Kayıt devam ederken yeni değişiklik (ör. Eşleştir) geldiyse hemen kaydet
+      if (mounted && _degisiklikVar) _otomatikKaydet();
     }
   }
 
@@ -2053,12 +2048,15 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                                             progVal > 0
                                                                 ? progVal
                                                                 : myDomVal;
+                                                        _pulseKiyasCtrl
+                                                            .putIfAbsent(
+                                                                pulseKey,
+                                                                () =>
+                                                                    TextEditingController());
+                                                        _pulseCtrlBagla(
+                                                            _pulseKiyasCtrl[
+                                                                pulseKey]!);
                                                         setState(() {
-                                                          _pulseKiyasCtrl
-                                                              .putIfAbsent(
-                                                                  pulseKey,
-                                                                  () =>
-                                                                      TextEditingController());
                                                           _pulseKiyasCtrl[
                                                                   pulseKey]!
                                                               .text = hedef >
@@ -2273,6 +2271,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                 (sagDeger - solDeger).abs() < 0.01;
                             if (!eslesF) yeniFarkSayisi++;
                           }
+                        }
+                        // Eşitlik bozulduysa onayı otomatik sıfırla
+                        if (_pulseKontrolOnaylandi && yeniFarkSayisi > 0) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted && _pulseKontrolOnaylandi) {
+                              setState(() => _pulseKontrolOnaylandi = false);
+                            }
+                          });
                         }
                         // Aktif: fark yok → onaylanabilir
                         // Pasif: fark var → tüm farklar kapatılmalı
@@ -2696,6 +2702,9 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
                 sistemAd, () => TextEditingController());
         }
       }
+
+      // Yeni oluşan ctrl'lere listener bağla
+      for (var c in _pulseKiyasCtrl.values) _pulseCtrlBagla(c);
 
       // Sonra setState ile değerleri yaz
       setState(() {
@@ -3165,6 +3174,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
             final ad = k['ad'] as String;
             _pulseKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
           }
+          // Yeni ctrl'lere listener bağla
+          for (var c in _pulseKiyasCtrl.values) _pulseCtrlBagla(c);
+          for (var c in _myDomKiyasCtrl.values) _pulseCtrlBagla(c);
         });
       }
     } catch (_) {}
@@ -3531,8 +3543,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       confirmText: 'Seç',
     );
     if (picked != null && picked != _secilenTarih) {
-      // Eski tarihteki kaydedilmemiş değişiklikleri kaydet
-      if (_degisiklikVar) _anindaKaydet();
+      // Eski tarihteki kaydedilmemiş değişiklikleri kaydet (await ile — race condition önle)
+      await _tarihOncesiKaydet();
 
       await _kilitBirak();
       setState(() {
@@ -3837,8 +3849,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               // Sadece o tarihe git — reddedildi henüz set edilmez
               final parcalar = retTarih.split('-');
               if (parcalar.length == 3) {
-                // Eski tarihteki kaydedilmemiş değişiklikleri kaydet
-                if (_degisiklikVar) _anindaKaydet();
+                await _tarihOncesiKaydet();
 
                 final tarih = DateTime(
                   int.tryParse(parcalar[0]) ?? 2000,
@@ -4352,8 +4363,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         if (sonuc == 'goruntule' && mounted) {
           final parcalar = retTarih.split('-');
           if (parcalar.length == 3) {
-            // Eski tarihteki kaydedilmemiş değişiklikleri kaydet
-            if (_degisiklikVar) _anindaKaydet();
+            await _tarihOncesiKaydet();
 
             final tarih = DateTime(
               int.tryParse(parcalar[0]) ?? 2000,
@@ -4854,13 +4864,16 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       _posListesi.clear();
       final posList = (data['posListesi'] as List?)?.cast<Map>() ?? [];
       if (posList.isEmpty) {
-        _posListesi.add(PosGirisi(ad: 'POS 1'));
+        final yeniPos = PosGirisi(ad: 'POS 1');
+        _posListesi.add(yeniPos);
+        _pulseCtrlBagla(yeniPos.tutarCtrl);
       } else {
         for (var p in posList) {
           final tutar = p['tutar'];
-          _posListesi.add(
-            PosGirisi(ad: p['ad'] ?? '', tutar: _sifirTemizle(tutar)),
-          );
+          final yeniPos =
+              PosGirisi(ad: p['ad'] ?? '', tutar: _sifirTemizle(tutar));
+          _posListesi.add(yeniPos);
+          _pulseCtrlBagla(yeniPos.tutarCtrl);
         }
       }
       _sistemPosCtrl.text = _sifirTemizle(data['sistemPos']);
@@ -4869,15 +4882,17 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       _yemekKartlari.clear();
       final yemekList = (data['yemekKartlari'] as List?)?.cast<Map>() ?? [];
       if (yemekList.isEmpty && _yemekKartiCinsleri.isNotEmpty) {
-        _yemekKartlari.add(YemekKartiGirisi(cins: _yemekKartiCinsleri.first));
+        final yeniYemek = YemekKartiGirisi(cins: _yemekKartiCinsleri.first);
+        _yemekKartlari.add(yeniYemek);
+        _pulseCtrlBagla(yeniYemek.tutarCtrl);
       } else {
         for (var y in yemekList) {
-          _yemekKartlari.add(
-            YemekKartiGirisi(
-              cins: y['cins'] as String? ?? '',
-              tutar: _sifirTemizle(y['tutar']),
-            ),
+          final yeniYemek = YemekKartiGirisi(
+            cins: y['cins'] as String? ?? '',
+            tutar: _sifirTemizle(y['tutar']),
           );
+          _yemekKartlari.add(yeniYemek);
+          _pulseCtrlBagla(yeniYemek.tutarCtrl);
         }
       }
       final sistemYemek = data['sistemYemekKartlari'] as Map?;
@@ -4887,7 +4902,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       }
       _gunlukSatisCtrl.text = _sifirTemizle(data['gunlukSatisToplami']);
 
-      // Pulse kıyas verileri yükle
+      // Pulse kıyas verileri yükle — önce temizle (eski tarih kalıntısı önle)
+      for (var c in _pulseKiyasCtrl.values) c.clear();
+      for (var c in _myDomKiyasCtrl.values) c.clear();
       final pulseKiyas =
           (data['pulseKiyasVerileri'] as Map<String, dynamic>?) ?? {};
       for (var e in pulseKiyas.entries) {
@@ -4909,6 +4926,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       _pulseKontrolOnaylandi = data['pulseKontrolOnaylandi'] == true;
       _pulseOkundu = data['pulseResmiOkundu'] == true;
       _myDomOkundu = data['myDomResmiOkundu'] == true;
+      // Yeni yüklenen ctrl'lere listener bağla
+      for (var c in _pulseKiyasCtrl.values) _pulseCtrlBagla(c);
+      for (var c in _myDomKiyasCtrl.values) _pulseCtrlBagla(c);
       // Online ödemeler
       final onlineList = (data['onlineOdemeler'] as List?)?.cast<Map>() ?? [];
       for (var o in _onlineOdemeler) {
@@ -5378,8 +5398,10 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   // Banka Parası = Brüt Satış - Sonuç toplamları (Pulse/MyDom sekmesinden)
   double get _bankaParasi {
+    // Pulse onaylanmamışsa Günlük Kasa ve Kasa Özeti'ne 0 aktar
+    if (!_pulseKontrolOnaylandi) return 0;
     // Pulse sayfasında hesaplanan banka parasını kullan (Pulse verileri bazlı)
-    if (_pulseBankaParasi != 0) return _pulseBankaParasi;
+    if (_pulseBankaParasi != 0) return _pulseBankaParasi.clamp(0, double.infinity);
     // Pulse verisi yoksa program değerlerinden hesapla
     final brutSatis = _parseDouble(_gunlukSatisCtrl.text);
     if (brutSatis <= 0) return 0;
@@ -5390,7 +5412,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     for (var o in _onlineOdemeler) {
       toplamSonuc += _parseDouble((o['ctrl'] as TextEditingController).text);
     }
-    return brutSatis - toplamSonuc;
+    return (brutSatis - toplamSonuc).clamp(0, double.infinity);
   }
 
   double get _toplamPos {
@@ -7107,22 +7129,32 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     );
   }
 
+  // Tarih değişimi öncesi bekleyen değişiklikleri kaydet (await ile)
+  Future<void> _tarihOncesiKaydet() async {
+    if (!_degisiklikVar) return;
+    if (mounted) _appBarMesajGoster('⏳ Kaydediliyor...');
+    try {
+      final tarihKey = _tarihKey(_secilenTarih);
+      await FirebaseFirestore.instance
+          .collection('subeler')
+          .doc(widget.subeKodu)
+          .collection('gunluk')
+          .doc(tarihKey)
+          .set(_otomatikKayitVerisi(), SetOptions(merge: true));
+      if (mounted) {
+        setState(() => _degisiklikVar = false);
+        _appBarMesajGoster('✓ Kaydedildi');
+      }
+    } catch (_) {
+      if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+    }
+  }
+
   Future<void> _tarihDegistir(int gunFarki) async {
     // İleri git: kapanmamış günden sonrasına geçilemez (ileri ok zaten pasif)
     // Geri git: serbest — kapanmamış günden geriye gidilebilir
     // Değişiklik varsa önce otomatik kaydet (timer beklemeden)
-    if (_degisiklikVar) {
-      try {
-        final tarihKey = _tarihKey(_secilenTarih);
-        await FirebaseFirestore.instance
-            .collection('subeler')
-            .doc(widget.subeKodu)
-            .collection('gunluk')
-            .doc(tarihKey)
-            .set(_otomatikKayitVerisi(), SetOptions(merge: true));
-        if (mounted) setState(() => _degisiklikVar = false);
-      } catch (_) {}
-    }
+    await _tarihOncesiKaydet();
     if (!await _degisiklikUyar(gecisMetni: 'Başka tarihe geçmeden')) return;
     final yeniTarih = _secilenTarih.add(Duration(days: gunFarki));
     final bugun = _bugunuHesapla();
@@ -7242,6 +7274,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _yemekKartlari[idx].dispose();
                                     _yemekKartlari.removeAt(idx);
                                     _degisiklikVar = true;
+                                    if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
                                   });
                                   _anindaKaydet();
                                 },
@@ -7253,12 +7286,17 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               TextButton.icon(
                 onPressed: _readOnly || _yemekKartiCinsleri.isEmpty
                     ? null
-                    : () => setState(() {
-                          _yemekKartlari.add(YemekKartiGirisi(
-                            cins: _yemekKartiCinsleri.first,
-                            yeni: true,
-                          ));
-                        }),
+                    : () {
+                        final yeniYemek = YemekKartiGirisi(
+                          cins: _yemekKartiCinsleri.first,
+                          yeni: true,
+                        );
+                        _pulseCtrlBagla(yeniYemek.tutarCtrl);
+                        setState(() {
+                          _yemekKartlari.add(yeniYemek);
+                          if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
+                        });
+                      },
                 icon: const Icon(Icons.add),
                 label: const Text('Satır Ekle'),
               ),
@@ -7443,6 +7481,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _posListesi[idx].dispose();
                                     _posListesi.removeAt(idx);
                                     _degisiklikVar = true;
+                                    if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
                                   });
                                   _anindaKaydet();
                                 },
@@ -7454,14 +7493,17 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               TextButton.icon(
                 onPressed: _readOnly
                     ? null
-                    : () => setState(
-                          () => _posListesi.add(
-                            PosGirisi(
-                              ad: 'POS ${_posListesi.length + 1}',
-                              yeni: true,
-                            ),
-                          ),
-                        ),
+                    : () {
+                        final yeniPos = PosGirisi(
+                          ad: 'POS ${_posListesi.length + 1}',
+                          yeni: true,
+                        );
+                        _pulseCtrlBagla(yeniPos.tutarCtrl);
+                        setState(() {
+                          _posListesi.add(yeniPos);
+                          if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
+                        });
+                      },
                 icon: const Icon(Icons.add),
                 label: const Text('POS Ekle'),
               ),
@@ -7681,6 +7723,10 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   Widget _ekrandaGorunenNakitSection() {
     final banka = _bankaParasi;
+    final pulseOnaylandi = _pulseKontrolOnaylandi;
+    final rawBanka = _pulseBankaParasi;
+    final negatif = pulseOnaylandi && rawBanka < 0;
+
     // Otomatik doldur — Banka Parası değişince ctrl'e yaz
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -7693,6 +7739,38 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         }
       }
     });
+
+    Color boxBg;
+    Color boxBorder;
+    Color iconColor;
+    Color textColor;
+    String displayText;
+
+    if (!pulseOnaylandi) {
+      boxBg = const Color(0xFFFFF7ED);
+      boxBorder = const Color(0xFFFB923C);
+      iconColor = const Color(0xFFF97316);
+      textColor = const Color(0xFFEA580C);
+      displayText = 'Pulse onaylanmamış';
+    } else if (negatif) {
+      boxBg = const Color(0xFFFEF2F2);
+      boxBorder = const Color(0xFFFCA5A5);
+      iconColor = const Color(0xFFDC2626);
+      textColor = const Color(0xFFDC2626);
+      displayText = 'Hesaplanan değer negatif (0 alındı)';
+    } else if (banka > 0) {
+      boxBg = const Color(0xFFE0F2FE);
+      boxBorder = const Color(0xFF0369A1);
+      iconColor = const Color(0xFF0369A1);
+      textColor = const Color(0xFF0369A1);
+      displayText = _formatTL(banka);
+    } else {
+      boxBg = Colors.grey[50]!;
+      boxBorder = Colors.grey[300]!;
+      iconColor = Colors.grey[400]!;
+      textColor = Colors.grey[400]!;
+      displayText = 'Pulse/MyDom sekmesinden hesaplanacak';
+    }
 
     return Card(
       child: Padding(
@@ -7731,40 +7809,41 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: banka > 0 ? const Color(0xFFE0F2FE) : Colors.grey[50],
+                color: boxBg,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color:
-                      banka > 0 ? const Color(0xFF0369A1) : Colors.grey[300]!,
-                  width: 1.5,
-                ),
+                border: Border.all(color: boxBorder, width: 1.5),
               ),
               child: Row(
                 children: [
                   Icon(Icons.account_balance_wallet,
-                      color: banka > 0
-                          ? const Color(0xFF0369A1)
-                          : Colors.grey[400],
-                      size: 20),
+                      color: iconColor, size: 20),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      banka > 0
-                          ? _formatTL(banka)
-                          : 'Pulse/MyDom sekmesinden hesaplanacak',
+                      displayText,
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: banka > 0 && pulseOnaylandi ? 18 : 14,
                         fontWeight: FontWeight.bold,
-                        color: banka > 0
-                            ? const Color(0xFF0369A1)
-                            : Colors.grey[400],
+                        color: textColor,
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-            if (banka <= 0) ...[
+            if (!pulseOnaylandi) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Pulse/MyDom sekmesinde "Pulse kontrol ettim" onaylandıktan sonra hesaplanır.',
+                style: TextStyle(fontSize: 12, color: const Color(0xFFF97316)),
+              ),
+            ] else if (negatif) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Brüt satış, POS + Yemek + Online toplamından düşük — farkı kontrol edin.',
+                style: TextStyle(fontSize: 12, color: const Color(0xFFDC2626)),
+              ),
+            ] else if (banka <= 0) ...[
               const SizedBox(height: 8),
               Text(
                 'Pulse/MyDom sekmesinde değerler girilince otomatik hesaplanır.',
