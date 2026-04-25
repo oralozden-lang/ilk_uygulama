@@ -2050,11 +2050,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                                             progVal > 0
                                                                 ? progVal
                                                                 : myDomVal;
-                                                        _pulseKiyasCtrl
-                                                            .putIfAbsent(
-                                                                pulseKey,
-                                                                () =>
-                                                                    TextEditingController());
+                                                        _pulseKiyasCtrl.putIfAbsent(
+                                                            pulseKey,
+                                                            () =>
+                                                                TextEditingController());
                                                         _pulseCtrlBagla(
                                                             _pulseKiyasCtrl[
                                                                 pulseKey]!);
@@ -5420,7 +5419,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     // Pulse onaylanmamışsa Günlük Kasa ve Kasa Özeti'ne 0 aktar
     if (!_pulseKontrolOnaylandi) return 0;
     // Pulse sayfasında hesaplanan banka parasını kullan (Pulse verileri bazlı)
-    if (_pulseBankaParasi != 0) return _pulseBankaParasi.clamp(0, double.infinity);
+    if (_pulseBankaParasi != 0)
+      return _pulseBankaParasi.clamp(0, double.infinity);
     // Pulse verisi yoksa program değerlerinden hesapla
     final brutSatis = _parseDouble(_gunlukSatisCtrl.text);
     if (brutSatis <= 0) return 0;
@@ -7298,7 +7298,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _yemekKartlari[idx].dispose();
                                     _yemekKartlari.removeAt(idx);
                                     _degisiklikVar = true;
-                                    if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
+                                    if (_pulseKontrolOnaylandi)
+                                      _pulseKontrolOnaylandi = false;
                                   });
                                   _anindaKaydet();
                                 },
@@ -7318,7 +7319,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                         _pulseCtrlBagla(yeniYemek.tutarCtrl);
                         setState(() {
                           _yemekKartlari.add(yeniYemek);
-                          if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
+                          if (_pulseKontrolOnaylandi)
+                            _pulseKontrolOnaylandi = false;
                         });
                       },
                 icon: const Icon(Icons.add),
@@ -7505,7 +7507,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _posListesi[idx].dispose();
                                     _posListesi.removeAt(idx);
                                     _degisiklikVar = true;
-                                    if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
+                                    if (_pulseKontrolOnaylandi)
+                                      _pulseKontrolOnaylandi = false;
                                   });
                                   _anindaKaydet();
                                 },
@@ -7525,7 +7528,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                         _pulseCtrlBagla(yeniPos.tutarCtrl);
                         setState(() {
                           _posListesi.add(yeniPos);
-                          if (_pulseKontrolOnaylandi) _pulseKontrolOnaylandi = false;
+                          if (_pulseKontrolOnaylandi)
+                            _pulseKontrolOnaylandi = false;
                         });
                       },
                 icon: const Icon(Icons.add),
