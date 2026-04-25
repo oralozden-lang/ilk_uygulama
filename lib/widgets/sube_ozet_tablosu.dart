@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
 import '../core/utils.dart';
-// ─── Şube Özet Tablosu ────────────────────────────────────────────────────────
 
 class SubeOzetTablosu extends StatefulWidget {
   final List<String> subeler;
@@ -41,11 +40,9 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
 
   bool _yukleniyor = false;
   Map<String, String> _subeAdlari = {};
-  // subeId → {ciro, anaKasaTL, anaKasaUSD, anaKasaEUR, anaKasaGBP}
   List<Map<String, dynamic>> _subeVeriler = [];
   List<Map<String, dynamic>> _karsilastirmaVeriler = [];
-
-  double _kdvOrani = 10.0; // Firestore'dan yüklenir
+  double _kdvOrani = 10.0;
 
   final _aylar = [
     'Ocak',
@@ -59,7 +56,7 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
     'Eylül',
     'Ekim',
     'Kasım',
-    'Aralık',
+    'Aralık'
   ];
 
   @override
@@ -68,18 +65,39 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
   @override
   void initState() {
     super.initState();
-    _subeAdlariniYukle();
-    // Sayfa açılınca mevcut ay ile otomatik yükle
-    WidgetsBinding.instance.addPostFrameCallback((_) => _yukle());
+    // Şube adları + ilk yükleme paralel — addPostFrameCallback gerekmez
+    _ilkYukle();
+  }
+
+  Future<void> _ilkYukle() async {
+    // Şube adları + KDV oranı + ana veri hepsi paralel
+    await Future.wait([
+      _subeAdlariniYukle(),
+      _kdvOraniYukle(),
+    ]);
+    if (mounted) await _veriYukleVeGuncelle();
   }
 
   Future<void> _subeAdlariniYukle() async {
-    final snap = await FirebaseFirestore.instance.collection('subeler').get();
-    final adlar = <String, String>{};
-    for (var doc in snap.docs) {
-      adlar[doc.id] = (doc.data()['ad'] as String?) ?? doc.id;
-    }
-    if (mounted) setState(() => _subeAdlari = adlar);
+    try {
+      final snap = await FirebaseFirestore.instance.collection('subeler').get();
+      final adlar = <String, String>{};
+      for (var doc in snap.docs) {
+        adlar[doc.id] = (doc.data()['ad'] as String?) ?? doc.id;
+      }
+      if (mounted) setState(() => _subeAdlari = adlar);
+    } catch (_) {}
+  }
+
+  Future<void> _kdvOraniYukle() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('ayarlar')
+          .doc('banknotlar')
+          .get();
+      final oran = (snap.data()?['kdvOrani'] as num?)?.toDouble() ?? 10.0;
+      if (mounted) setState(() => _kdvOrani = oran);
+    } catch (_) {}
   }
 
   List<String> get _aktifSubeler =>
@@ -89,9 +107,8 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
       '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
 
   String _baslangicKey() {
-    if (_filtreModu == 'ay') {
+    if (_filtreModu == 'ay')
       return '${_secilenYil.toString().padLeft(4, '0')}-${_secilenAy.toString().padLeft(2, '0')}-01';
-    }
     return _tarihKey(_baslangic);
   }
 
@@ -104,9 +121,8 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
   }
 
   String _karsilastirmaBasKey() {
-    if (_filtreModu == 'ay') {
+    if (_filtreModu == 'ay')
       return '${_karsilastirmaYil.toString().padLeft(4, '0')}-${_karsilastirmaAy.toString().padLeft(2, '0')}-01';
-    }
     return _tarihKey(_karsilastirmaBaslangic);
   }
 
@@ -119,83 +135,111 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
   }
 
   Future<List<Map<String, dynamic>>> _veriCek(String bas, String bit) async {
-    // Tüm şubeler paralel — sıralı await yerine Future.wait
     final futures = _aktifSubeler.map((subeId) async {
-      final snap = await FirebaseFirestore.instance
-          .collection('subeler')
-          .doc(subeId)
-          .collection('gunluk')
-          .where('tarih', isGreaterThanOrEqualTo: bas)
-          .where('tarih', isLessThanOrEqualTo: bit)
-          .orderBy('tarih')
-          .get();
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('subeler')
+            .doc(subeId)
+            .collection('gunluk')
+            .where('tarih', isGreaterThanOrEqualTo: bas)
+            .where('tarih', isLessThanOrEqualTo: bit)
+            .orderBy('tarih')
+            .get();
 
-      double ciro = 0,
-          anaKasaTL = 0,
-          anaKasaUSD = 0,
-          anaKasaEUR = 0,
-          anaKasaGBP = 0;
-      for (var doc in snap.docs) {
-        final d = doc.data();
-        ciro += ((d['gunlukSatisToplami'] as num?) ?? 0).toDouble();
-      }
-      // Ana Kasa: dönemin son gününün kalanı
-      if (snap.docs.isNotEmpty) {
-        final son = snap.docs.last.data();
-        anaKasaTL = ((son['anaKasaKalani'] as num?) ?? 0).toDouble();
-        final dovizKalanlar = son['dovizAnaKasaKalanlari'] as Map?;
-        if (dovizKalanlar != null) {
-          anaKasaUSD = ((dovizKalanlar['USD'] as num?) ?? 0).toDouble();
-          anaKasaEUR = ((dovizKalanlar['EUR'] as num?) ?? 0).toDouble();
-          anaKasaGBP = ((dovizKalanlar['GBP'] as num?) ?? 0).toDouble();
+        double ciro = 0,
+            anaKasaTL = 0,
+            anaKasaUSD = 0,
+            anaKasaEUR = 0,
+            anaKasaGBP = 0;
+        for (var doc in snap.docs) {
+          ciro += ((doc.data()['gunlukSatisToplami'] as num?) ?? 0).toDouble();
         }
+        if (snap.docs.isNotEmpty) {
+          final son = snap.docs.last.data();
+          anaKasaTL = ((son['anaKasaKalani'] as num?) ?? 0).toDouble();
+          final dovizKalanlar = son['dovizAnaKasaKalanlari'] as Map?;
+          if (dovizKalanlar != null) {
+            anaKasaUSD = ((dovizKalanlar['USD'] as num?) ?? 0).toDouble();
+            anaKasaEUR = ((dovizKalanlar['EUR'] as num?) ?? 0).toDouble();
+            anaKasaGBP = ((dovizKalanlar['GBP'] as num?) ?? 0).toDouble();
+          }
+        }
+        return {
+          'subeId': subeId,
+          'subeAd': _subeAdlari[subeId] ?? subeId,
+          'ciro': ciro,
+          'anaKasaTL': anaKasaTL,
+          'anaKasaUSD': anaKasaUSD,
+          'anaKasaEUR': anaKasaEUR,
+          'anaKasaGBP': anaKasaGBP,
+        };
+      } catch (_) {
+        return {
+          'subeId': subeId,
+          'subeAd': _subeAdlari[subeId] ?? subeId,
+          'ciro': 0.0,
+          'anaKasaTL': 0.0,
+          'anaKasaUSD': 0.0,
+          'anaKasaEUR': 0.0,
+          'anaKasaGBP': 0.0
+        };
       }
-      return {
-        'subeId': subeId,
-        'subeAd': _subeAdlari[subeId] ?? subeId,
-        'ciro': ciro,
-        'anaKasaTL': anaKasaTL,
-        'anaKasaUSD': anaKasaUSD,
-        'anaKasaEUR': anaKasaEUR,
-        'anaKasaGBP': anaKasaGBP,
-      };
     });
-
     return List<Map<String, dynamic>>.from(await Future.wait(futures));
   }
 
   Future<void> _yukle() async {
+    if (!mounted) return;
     setState(() => _yukleniyor = true);
     try {
-      // KDV oranını Firestore'dan yükle
-      final ayarSnap = await FirebaseFirestore.instance
-          .collection('ayarlar')
-          .doc('banknotlar')
-          .get();
-      final kdvOrani =
-          (ayarSnap.data()?['kdvOrani'] as num?)?.toDouble() ?? 10.0;
+      await _veriYukleVeGuncelle();
+    } catch (_) {
+      if (mounted) setState(() => _yukleniyor = false);
+    }
+  }
 
-      final veriler = await _veriCek(_baslangicKey(), _bitisKey());
-      // Ciro büyükten küçüğe sırala
-      veriler.sort(
-        (a, b) => (b['ciro'] as double).compareTo(a['ciro'] as double),
-      );
-      List<Map<String, dynamic>> karsilastirma = [];
-      if (_karsilastirmaAcik) {
-        karsilastirma = await _veriCek(
-          _karsilastirmaBasKey(),
-          _karsilastirmaBitKey(),
-        );
-      }
+  /// Ana veri + karşılaştırma + KDV paralel çeker
+  Future<void> _veriYukleVeGuncelle() async {
+    if (!mounted) return;
+    setState(() => _yukleniyor = true);
+    try {
+      // Ana veri + karşılaştırma + KDV aynı anda
+      final results = await Future.wait([
+        _veriCek(_baslangicKey(), _bitisKey()),
+        if (_karsilastirmaAcik)
+          _veriCek(_karsilastirmaBasKey(), _karsilastirmaBitKey())
+        else
+          Future.value(<Map<String, dynamic>>[]),
+        _kdvOraniGetir(),
+      ]);
+
+      final veriler = results[0] as List<Map<String, dynamic>>;
+      veriler
+          .sort((a, b) => (b['ciro'] as double).compareTo(a['ciro'] as double));
+
       if (mounted)
         setState(() {
           _subeVeriler = veriler;
-          _karsilastirmaVeriler = karsilastirma;
-          _kdvOrani = kdvOrani;
+          _karsilastirmaVeriler = _karsilastirmaAcik
+              ? results[1] as List<Map<String, dynamic>>
+              : [];
+          _kdvOrani = results[2] as double;
           _yukleniyor = false;
         });
-    } catch (e) {
+    } catch (_) {
       if (mounted) setState(() => _yukleniyor = false);
+    }
+  }
+
+  Future<double> _kdvOraniGetir() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('ayarlar')
+          .doc('banknotlar')
+          .get();
+      return (snap.data()?['kdvOrani'] as num?)?.toDouble() ?? 10.0;
+    } catch (_) {
+      return _kdvOrani; // mevcut değeri koru
     }
   }
 
@@ -244,13 +288,11 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
       excel.rename('Sheet1', 'Şube Özet');
       final sheet = excel['Şube Özet'];
 
-      // Başlıklar
       final basliklar = ['Şube', 'Ciro', 'Ana Kasa (TL)', 'USD', 'EUR', 'GBP'];
       if (_karsilastirmaAcik) basliklar.addAll(['Önceki Ciro', 'Fark %']);
       for (int i = 0; i < basliklar.length; i++) {
-        final cell = sheet.cell(
-          xl.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0),
-        );
+        final cell = sheet
+            .cell(xl.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
         cell.value = xl.TextCellValue(basliklar[i]);
         cell.cellStyle = xl.CellStyle(
           bold: true,
@@ -259,27 +301,16 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
         );
       }
 
-      // Toplam satırı
-      double toplamCiro = _subeVeriler.fold(
-        0.0,
-        (s, v) => s + (v['ciro'] as double),
-      );
-      double toplamTL = _subeVeriler.fold(
-        0.0,
-        (s, v) => s + (v['anaKasaTL'] as double),
-      );
-      double toplamUSD = _subeVeriler.fold(
-        0.0,
-        (s, v) => s + (v['anaKasaUSD'] as double),
-      );
-      double toplamEUR = _subeVeriler.fold(
-        0.0,
-        (s, v) => s + (v['anaKasaEUR'] as double),
-      );
-      double toplamGBP = _subeVeriler.fold(
-        0.0,
-        (s, v) => s + (v['anaKasaGBP'] as double),
-      );
+      double toplamCiro =
+          _subeVeriler.fold(0.0, (s, v) => s + (v['ciro'] as double));
+      double toplamTL =
+          _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaTL'] as double));
+      double toplamUSD =
+          _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaUSD'] as double));
+      double toplamEUR =
+          _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaEUR'] as double));
+      double toplamGBP =
+          _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaGBP'] as double));
 
       final toplamRow = [
         xl.TextCellValue('GENEL TOPLAM'),
@@ -290,17 +321,14 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
         xl.DoubleCellValue(toplamGBP),
       ];
       for (int i = 0; i < toplamRow.length; i++) {
-        final cell = sheet.cell(
-          xl.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 1),
-        );
+        final cell = sheet
+            .cell(xl.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 1));
         cell.value = toplamRow[i];
         cell.cellStyle = xl.CellStyle(
-          bold: true,
-          backgroundColorHex: xl.ExcelColor.fromHexString('#E3F2FD'),
-        );
+            bold: true,
+            backgroundColorHex: xl.ExcelColor.fromHexString('#E3F2FD'));
       }
 
-      // Şube satırları
       for (int r = 0; r < _subeVeriler.length; r++) {
         final v = _subeVeriler[r];
         final rowData = [
@@ -321,31 +349,20 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
         }
         for (int i = 0; i < rowData.length; i++) {
           sheet
-              .cell(
-                xl.CellIndex.indexByColumnRow(
-                  columnIndex: i,
-                  rowIndex: r + 2,
-                ),
-              )
+              .cell(xl.CellIndex.indexByColumnRow(
+                  columnIndex: i, rowIndex: r + 2))
               .value = rowData[i];
         }
       }
 
       final bytes = excel.save();
-      if (bytes != null) {
+      if (bytes != null)
         await excelKaydet(
-          bytes,
-          'sube_ozet_${_baslangicKey()}_${_bitisKey()}.xlsx',
-        );
-      }
+            bytes, 'sube_ozet_${_baslangicKey()}_${_bitisKey()}.xlsx');
     } catch (e) {
       if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Excel hatası: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Excel hatası: $e'), backgroundColor: Colors.red));
     }
   }
 
@@ -359,38 +376,25 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
             .reduce((a, b) => a > b ? a : b)
             .clamp(1.0, double.infinity);
 
-    final toplamCiro = _subeVeriler.fold(
-      0.0,
-      (s, v) => s + (v['ciro'] as double),
-    );
-    final toplamTL = _subeVeriler.fold(
-      0.0,
-      (s, v) => s + (v['anaKasaTL'] as double),
-    );
-    final toplamUSD = _subeVeriler.fold(
-      0.0,
-      (s, v) => s + (v['anaKasaUSD'] as double),
-    );
-    final toplamEUR = _subeVeriler.fold(
-      0.0,
-      (s, v) => s + (v['anaKasaEUR'] as double),
-    );
-    final toplamGBP = _subeVeriler.fold(
-      0.0,
-      (s, v) => s + (v['anaKasaGBP'] as double),
-    );
+    final toplamCiro =
+        _subeVeriler.fold(0.0, (s, v) => s + (v['ciro'] as double));
+    final toplamTL =
+        _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaTL'] as double));
+    final toplamUSD =
+        _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaUSD'] as double));
+    final toplamEUR =
+        _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaEUR'] as double));
+    final toplamGBP =
+        _subeVeriler.fold(0.0, (s, v) => s + (v['anaKasaGBP'] as double));
+    final oncekiToplamCiro =
+        _karsilastirmaVeriler.fold(0.0, (s, v) => s + (v['ciro'] as double));
 
-    final oncekiToplamCiro = _karsilastirmaVeriler.fold(
-      0.0,
-      (s, v) => s + (v['ciro'] as double),
-    );
-
+    // UI — orijinalle birebir aynı, sadece _yukle çağrısı _veriYukleVeGuncelle oldu
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Filtre ───────────────────────────────────────────────────────
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -400,15 +404,13 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                   SegmentedButton<String>(
                     segments: const [
                       ButtonSegment(
-                        value: 'ay',
-                        label: Text('Ay Seç'),
-                        icon: Icon(Icons.calendar_month),
-                      ),
+                          value: 'ay',
+                          label: Text('Ay Seç'),
+                          icon: Icon(Icons.calendar_month)),
                       ButtonSegment(
-                        value: 'aralik',
-                        label: Text('Tarih Aralığı'),
-                        icon: Icon(Icons.date_range),
-                      ),
+                          value: 'aralik',
+                          label: Text('Tarih Aralığı'),
+                          icon: Icon(Icons.date_range)),
                     ],
                     selected: {_filtreModu},
                     onSelectionChanged: (s) =>
@@ -416,90 +418,65 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                   ),
                   const SizedBox(height: 12),
                   if (_filtreModu == 'ay') ...[
-                    Row(
-                      children: [
-                        Expanded(
+                    Row(children: [
+                      Expanded(
                           child: DropdownButtonFormField<int>(
-                            value: _secilenAy,
-                            decoration: const InputDecoration(
-                              labelText: 'Ay',
-                              border: OutlineInputBorder(),
-                            ),
-                            items: List.generate(
-                              12,
-                              (i) => DropdownMenuItem(
-                                value: i + 1,
-                                child: Text(_aylar[i]),
-                              ),
-                            ),
-                            onChanged: (v) => setState(() => _secilenAy = v!),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
+                        value: _secilenAy,
+                        decoration: const InputDecoration(
+                            labelText: 'Ay', border: OutlineInputBorder()),
+                        items: List.generate(
+                            12,
+                            (i) => DropdownMenuItem(
+                                value: i + 1, child: Text(_aylar[i]))),
+                        onChanged: (v) => setState(() => _secilenAy = v!),
+                      )),
+                      const SizedBox(width: 8),
+                      Expanded(
                           child: DropdownButtonFormField<int>(
-                            value: _secilenYil,
-                            decoration: const InputDecoration(
-                              labelText: 'Yıl',
-                              border: OutlineInputBorder(),
-                            ),
-                            items:
-                                List.generate(5, (i) => DateTime.now().year - i)
-                                    .map(
-                                      (y) => DropdownMenuItem(
-                                        value: y,
-                                        child: Text('$y'),
-                                      ),
-                                    )
-                                    .toList(),
-                            onChanged: (v) => setState(() => _secilenYil = v!),
-                          ),
-                        ),
-                      ],
-                    ),
+                        value: _secilenYil,
+                        decoration: const InputDecoration(
+                            labelText: 'Yıl', border: OutlineInputBorder()),
+                        items: List.generate(5, (i) => DateTime.now().year - i)
+                            .map((y) =>
+                                DropdownMenuItem(value: y, child: Text('$y')))
+                            .toList(),
+                        onChanged: (v) => setState(() => _secilenYil = v!),
+                      )),
+                    ]),
                   ] else ...[
-                    Row(
-                      children: [
-                        Expanded(
+                    Row(children: [
+                      Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () async {
-                              final p = await showDatePicker(
-                                context: context,
-                                initialDate: _baslangic,
-                                firstDate: DateTime(2020),
-                                lastDate: DateTime.now(),
-                              );
-                              if (p != null) setState(() => _baslangic = p);
-                            },
-                            icon: const Icon(Icons.calendar_today, size: 16),
-                            label: Text(
-                              '${_baslangic.day.toString().padLeft(2, '0')}.${_baslangic.month.toString().padLeft(2, '0')}.${_baslangic.year}',
-                            ),
-                          ),
-                        ),
-                        const Padding(
+                        onPressed: () async {
+                          final p = await showDatePicker(
+                              context: context,
+                              initialDate: _baslangic,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime.now());
+                          if (p != null) setState(() => _baslangic = p);
+                        },
+                        icon: const Icon(Icons.calendar_today, size: 16),
+                        label: Text(
+                            '${_baslangic.day.toString().padLeft(2, '0')}.${_baslangic.month.toString().padLeft(2, '0')}.${_baslangic.year}'),
+                      )),
+                      const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 8),
-                          child: Text('—'),
-                        ),
-                        Expanded(
+                          child: Text('—')),
+                      Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () async {
-                              final p = await showDatePicker(
-                                context: context,
-                                initialDate: _bitis,
-                                firstDate: _baslangic,
-                                lastDate: DateTime.now(),
-                              );
-                              if (p != null) setState(() => _bitis = p);
-                            },
-                            icon: const Icon(Icons.calendar_today, size: 16),
-                            label: Text(
-                              '${_bitis.day.toString().padLeft(2, '0')}.${_bitis.month.toString().padLeft(2, '0')}.${_bitis.year}',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                        onPressed: () async {
+                          final p = await showDatePicker(
+                              context: context,
+                              initialDate: _bitis,
+                              firstDate: _baslangic,
+                              lastDate: DateTime.now());
+                          if (p != null) setState(() => _bitis = p);
+                        },
+                        icon: const Icon(Icons.calendar_today, size: 16),
+                        label: Text(
+                            '${_bitis.day.toString().padLeft(2, '0')}.${_bitis.month.toString().padLeft(2, '0')}.${_bitis.year}'),
+                      )),
+                    ]),
                   ],
                   const SizedBox(height: 8),
                   SwitchListTile(
@@ -512,7 +489,6 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                       setState(() {
                         _karsilastirmaAcik = v;
                         if (v) {
-                          // Açılınca otomatik: bir önceki ay
                           final simdi = DateTime.now();
                           final oncekiAy =
                               simdi.month == 1 ? 12 : simdi.month - 1;
@@ -520,17 +496,10 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                               simdi.month == 1 ? simdi.year - 1 : simdi.year;
                           _karsilastirmaAy = oncekiAy;
                           _karsilastirmaYil = oncekiYil;
-                          _karsilastirmaBaslangic = DateTime(
-                            oncekiYil,
-                            oncekiAy,
-                            1,
-                          );
-                          _karsilastirmaBitis = DateTime(
-                            oncekiYil,
-                            oncekiAy + 1,
-                            0,
-                          );
-                          // Karşılaştırma modunu ana filtreden bağımsız başlat
+                          _karsilastirmaBaslangic =
+                              DateTime(oncekiYil, oncekiAy, 1);
+                          _karsilastirmaBitis =
+                              DateTime(oncekiYil, oncekiAy + 1, 0);
                         }
                       });
                     },
@@ -538,154 +507,115 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                   if (_karsilastirmaAcik) ...[
                     const SizedBox(height: 8),
                     if (_filtreModu == 'ay')
-                      Row(
-                        children: [
-                          Expanded(
+                      Row(children: [
+                        Expanded(
                             child: DropdownButtonFormField<int>(
-                              value: _karsilastirmaAy,
-                              decoration: const InputDecoration(
-                                labelText: 'Karş. Ay',
-                                border: OutlineInputBorder(),
-                              ),
-                              items: List.generate(
-                                12,
-                                (i) => DropdownMenuItem(
-                                  value: i + 1,
-                                  child: Text(_aylar[i]),
-                                ),
-                              ),
-                              onChanged: (v) =>
-                                  setState(() => _karsilastirmaAy = v!),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
+                          value: _karsilastirmaAy,
+                          decoration: const InputDecoration(
+                              labelText: 'Karş. Ay',
+                              border: OutlineInputBorder()),
+                          items: List.generate(
+                              12,
+                              (i) => DropdownMenuItem(
+                                  value: i + 1, child: Text(_aylar[i]))),
+                          onChanged: (v) =>
+                              setState(() => _karsilastirmaAy = v!),
+                        )),
+                        const SizedBox(width: 8),
+                        Expanded(
                             child: DropdownButtonFormField<int>(
-                              value: _karsilastirmaYil,
-                              decoration: const InputDecoration(
-                                labelText: 'Karş. Yıl',
-                                border: OutlineInputBorder(),
-                              ),
-                              items: List.generate(
-                                5,
-                                (i) => DateTime.now().year - i,
-                              )
-                                  .map(
-                                    (y) => DropdownMenuItem(
-                                      value: y,
-                                      child: Text('$y'),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) =>
-                                  setState(() => _karsilastirmaYil = v!),
-                            ),
-                          ),
-                        ],
-                      ),
+                          value: _karsilastirmaYil,
+                          decoration: const InputDecoration(
+                              labelText: 'Karş. Yıl',
+                              border: OutlineInputBorder()),
+                          items: List.generate(
+                                  5, (i) => DateTime.now().year - i)
+                              .map((y) =>
+                                  DropdownMenuItem(value: y, child: Text('$y')))
+                              .toList(),
+                          onChanged: (v) =>
+                              setState(() => _karsilastirmaYil = v!),
+                        )),
+                      ]),
                     if (_filtreModu == 'aralik')
-                      Row(
-                        children: [
-                          Expanded(
+                      Row(children: [
+                        Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: () async {
-                                final p = await showDatePicker(
-                                  context: context,
-                                  initialDate: _karsilastirmaBaslangic,
-                                  firstDate: DateTime(2020),
-                                  lastDate: DateTime.now(),
-                                );
-                                if (p != null)
-                                  setState(() => _karsilastirmaBaslangic = p);
-                              },
-                              icon: const Icon(Icons.calendar_today, size: 16),
-                              label: Text(
-                                '${_karsilastirmaBaslangic.day.toString().padLeft(2, '0')}.${_karsilastirmaBaslangic.month.toString().padLeft(2, '0')}.${_karsilastirmaBaslangic.year}',
-                              ),
-                            ),
-                          ),
-                          const Padding(
+                          onPressed: () async {
+                            final p = await showDatePicker(
+                                context: context,
+                                initialDate: _karsilastirmaBaslangic,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime.now());
+                            if (p != null)
+                              setState(() => _karsilastirmaBaslangic = p);
+                          },
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          label: Text(
+                              '${_karsilastirmaBaslangic.day.toString().padLeft(2, '0')}.${_karsilastirmaBaslangic.month.toString().padLeft(2, '0')}.${_karsilastirmaBaslangic.year}'),
+                        )),
+                        const Padding(
                             padding: EdgeInsets.symmetric(horizontal: 8),
-                            child: Text('—'),
-                          ),
-                          Expanded(
+                            child: Text('—')),
+                        Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: () async {
-                                final p = await showDatePicker(
-                                  context: context,
-                                  initialDate: _karsilastirmaBitis,
-                                  firstDate: _karsilastirmaBaslangic,
-                                  lastDate: DateTime.now(),
-                                );
-                                if (p != null)
-                                  setState(() => _karsilastirmaBitis = p);
-                              },
-                              icon: const Icon(Icons.calendar_today, size: 16),
-                              label: Text(
-                                '${_karsilastirmaBitis.day.toString().padLeft(2, '0')}.${_karsilastirmaBitis.month.toString().padLeft(2, '0')}.${_karsilastirmaBitis.year}',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                          onPressed: () async {
+                            final p = await showDatePicker(
+                                context: context,
+                                initialDate: _karsilastirmaBitis,
+                                firstDate: _karsilastirmaBaslangic,
+                                lastDate: DateTime.now());
+                            if (p != null)
+                              setState(() => _karsilastirmaBitis = p);
+                          },
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          label: Text(
+                              '${_karsilastirmaBitis.day.toString().padLeft(2, '0')}.${_karsilastirmaBitis.month.toString().padLeft(2, '0')}.${_karsilastirmaBitis.year}'),
+                        )),
+                      ]),
                   ],
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
+                  Row(children: [
+                    Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: _yukle,
-                          icon: _yukleniyor
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.search),
-                          label: const Text('Raporu Getir'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0288D1),
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ),
-                      if (_subeVeriler.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: _excelIndir,
-                          icon: const Icon(Icons.table_chart, size: 18),
-                          label: const Text('Excel'),
-                          style: OutlinedButton.styleFrom(
+                      onPressed: _yukle,
+                      icon: _yukleniyor
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
+                          : const Icon(Icons.search),
+                      label: const Text('Raporu Getir'),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0288D1),
+                          foregroundColor: Colors.white),
+                    )),
+                    if (_subeVeriler.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _excelIndir,
+                        icon: const Icon(Icons.table_chart, size: 18),
+                        label: const Text('Excel'),
+                        style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.green[700],
-                            side: BorderSide(color: Colors.green[700]!),
-                          ),
-                        ),
-                      ],
+                            side: BorderSide(color: Colors.green[700]!)),
+                      ),
                     ],
-                  ),
+                  ]),
                 ],
               ),
             ),
           ),
-
           if (_subeVeriler.isNotEmpty) ...[
             const SizedBox(height: 16),
-
-            // ── CİRO BÖLÜMÜ ─────────────────────────────────────────────
-            const Text(
-              'Ciro Sıralaması',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.black54,
-                letterSpacing: 0.5,
-              ),
-            ),
+            const Text('Ciro Sıralaması',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black54,
+                    letterSpacing: 0.5)),
             const SizedBox(height: 6),
-            // Ciro kartı — şube adı + bar sabit, sağa scroll ile KDVsiz görünür
             ClipRRect(
               borderRadius: BorderRadius.circular(14),
               child: Container(
@@ -694,155 +624,107 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0288D1).withOpacity(0.08),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
+                        color: const Color(0xFF0288D1).withOpacity(0.08),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2))
                   ],
                 ),
                 child: Column(
                   children: [
-                    // ── HEADER ──────────────────────────────────────────────
                     Container(
                       decoration: const BoxDecoration(
                         color: Color(0xFF0288D1),
                         borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(14),
-                          topRight: Radius.circular(14),
-                        ),
+                            topLeft: Radius.circular(14),
+                            topRight: Radius.circular(14)),
                       ),
-                      child: Row(
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
-                            ),
-                            child: Text(
-                              'Genel Toplam Ciro',
+                      child: Row(children: [
+                        const Padding(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                          child: Text('Genel Toplam Ciro',
                               style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                          Expanded(
+                                  color: Colors.white70, fontSize: 12)),
+                        ),
+                        Expanded(
                             child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 10,
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (_karsilastirmaAcik &&
-                                        oncekiToplamCiro > 0) ...[
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          Text(
-                                            'Önceki: ${_fmt(oncekiToplamCiro)}',
-                                            style: const TextStyle(
+                          scrollDirection: Axis.horizontal,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 10),
+                            child:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              if (_karsilastirmaAcik &&
+                                  oncekiToplamCiro > 0) ...[
+                                Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text('Önceki: ${_fmt(oncekiToplamCiro)}',
+                                          style: const TextStyle(
                                               color: Colors.white54,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 1,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withOpacity(
-                                                0.15,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(3),
-                                            ),
-                                            child: Text(
-                                              _fmtYuzde(
-                                                toplamCiro,
-                                                oncekiToplamCiro,
-                                              ),
-                                              style: TextStyle(
+                                              fontSize: 10)),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 6, vertical: 1),
+                                        decoration: BoxDecoration(
+                                            color:
+                                                Colors.white.withOpacity(0.15),
+                                            borderRadius:
+                                                BorderRadius.circular(3)),
+                                        child: Text(
+                                            _fmtYuzde(
+                                                toplamCiro, oncekiToplamCiro),
+                                            style: TextStyle(
                                                 fontSize: 10,
                                                 color: toplamCiro >=
                                                         oncekiToplamCiro
                                                     ? Colors.greenAccent
-                                                    : Colors.redAccent,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                                    : Colors.redAccent)),
                                       ),
-                                      const SizedBox(width: 10),
-                                    ],
-                                    Text(
-                                      _fmt(toplamCiro),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    if (toplamCiro > 0) ...[
-                                      const SizedBox(width: 10),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.15),
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
-                                          border: Border.all(
-                                            color: Colors.white.withOpacity(
-                                              0.3,
-                                            ),
-                                          ),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.end,
-                                          children: [
-                                            Text(
-                                              'KDVsiz (%${_kdvOrani.toStringAsFixed(0)})',
-                                              style: TextStyle(
-                                                color: Colors.white.withOpacity(
-                                                  0.7,
-                                                ),
-                                                fontSize: 9,
-                                              ),
-                                            ),
-                                            Text(
-                                              _fmt(
-                                                toplamCiro /
-                                                    (1 + _kdvOrani / 100),
-                                              ),
-                                              style: const TextStyle(
+                                    ]),
+                                const SizedBox(width: 10),
+                              ],
+                              Text(_fmt(toplamCiro),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold)),
+                              if (toplamCiro > 0) ...[
+                                const SizedBox(width: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                        color: Colors.white.withOpacity(0.3)),
+                                  ),
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                            'KDVsiz (%${_kdvOrani.toStringAsFixed(0)})',
+                                            style: TextStyle(
+                                                color: Colors.white
+                                                    .withOpacity(0.7),
+                                                fontSize: 9)),
+                                        Text(
+                                            _fmt(toplamCiro /
+                                                (1 + _kdvOrani / 100)),
+                                            style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 13,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ],
+                                                fontWeight: FontWeight.bold)),
+                                      ]),
                                 ),
-                              ),
-                            ),
+                              ],
+                            ]),
                           ),
-                        ],
-                      ),
+                        )),
+                      ]),
                     ),
-                    // ── ŞUBE SATIRLARI ──────────────────────────────────────
                     ..._subeVeriler.asMap().entries.map((entry) {
                       final i = entry.key;
                       final v = entry.value;
@@ -863,224 +745,167 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                           : [Colors.grey[100]!, Colors.grey[600]!];
                       return Container(
                         decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: Colors.grey.withOpacity(0.12),
-                            ),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            // SABİT SOL: sıra no + şube adı + bar
-                            Expanded(
+                            border: Border(
+                                bottom: BorderSide(
+                                    color: Colors.grey.withOpacity(0.12)))),
+                        child: Row(children: [
+                          Expanded(
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 22,
-                                      height: 22,
-                                      decoration: BoxDecoration(
-                                        color: rankColor[0],
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          '${i + 1}',
-                                          style: TextStyle(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            child: Row(children: [
+                              Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                    color: rankColor[0],
+                                    shape: BoxShape.circle),
+                                child: Center(
+                                    child: Text('${i + 1}',
+                                        style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: rankColor[1],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            v['subeAd'] as String,
-                                            style: const TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 4),
-                                          ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              3,
-                                            ),
-                                            child: LinearProgressIndicator(
-                                              value: barOran,
-                                              backgroundColor: Colors.grey[100],
-                                              valueColor:
-                                                  const AlwaysStoppedAnimation<
-                                                      Color>(Color(0xFF0288D1)),
-                                              minHeight: 5,
-                                            ),
-                                          ),
-                                          if (_karsilastirmaAcik &&
-                                              oncekiCiro > 0) ...[
-                                            const SizedBox(height: 2),
-                                            ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(3),
-                                              child: LinearProgressIndicator(
-                                                value: oncekiBarOran,
-                                                backgroundColor:
-                                                    Colors.grey[100],
-                                                valueColor:
-                                                    const AlwaysStoppedAnimation<
-                                                            Color>(
-                                                        Color(0xFF90A4AE)),
-                                                minHeight: 3,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                            color: rankColor[1]))),
                               ),
-                            ),
-                            // SCROLL SAĞ: ciro + KDVsiz
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                child: Row(
+                              const SizedBox(width: 8),
+                              Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                    Text(v['subeAd'] as String,
+                                        style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500),
+                                        overflow: TextOverflow.ellipsis),
+                                    const SizedBox(height: 4),
+                                    ClipRRect(
+                                        borderRadius: BorderRadius.circular(3),
+                                        child: LinearProgressIndicator(
+                                          value: barOran,
+                                          backgroundColor: Colors.grey[100],
+                                          valueColor:
+                                              const AlwaysStoppedAnimation<
+                                                  Color>(Color(0xFF0288D1)),
+                                          minHeight: 5,
+                                        )),
+                                    if (_karsilastirmaAcik &&
+                                        oncekiCiro > 0) ...[
+                                      const SizedBox(height: 2),
+                                      ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(3),
+                                          child: LinearProgressIndicator(
+                                            value: oncekiBarOran,
+                                            backgroundColor: Colors.grey[100],
+                                            valueColor:
+                                                const AlwaysStoppedAnimation<
+                                                    Color>(Color(0xFF90A4AE)),
+                                            minHeight: 3,
+                                          )),
+                                    ],
+                                  ])),
+                            ]),
+                          )),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          _fmt(ciro),
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        if (_karsilastirmaAcik &&
-                                            oncekiCiro > 0) ...[
-                                          const SizedBox(height: 2),
-                                          Builder(
-                                            builder: (_) {
-                                              final yuzde = _fmtYuzde(
-                                                ciro,
-                                                oncekiCiro,
-                                              );
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Text(_fmt(ciro),
+                                              style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold)),
+                                          if (_karsilastirmaAcik &&
+                                              oncekiCiro > 0) ...[
+                                            const SizedBox(height: 2),
+                                            Builder(builder: (_) {
+                                              final yuzde =
+                                                  _fmtYuzde(ciro, oncekiCiro);
                                               final artis = ciro >= oncekiCiro;
                                               return Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.end,
-                                                children: [
-                                                  Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                      horizontal: 4,
-                                                      vertical: 1,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.end,
+                                                  children: [
+                                                    Container(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          horizontal: 4,
+                                                          vertical: 1),
+                                                      decoration: BoxDecoration(
+                                                          color: artis
+                                                              ? Colors.green[50]
+                                                              : Colors.red[50],
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(3)),
+                                                      child: Text(yuzde,
+                                                          style: TextStyle(
+                                                              fontSize: 10,
+                                                              color: artis
+                                                                  ? Colors.green[
+                                                                      700]
+                                                                  : Colors.red[
+                                                                      700])),
                                                     ),
-                                                    decoration: BoxDecoration(
-                                                      color: artis
-                                                          ? Colors.green[50]
-                                                          : Colors.red[50],
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                        3,
-                                                      ),
-                                                    ),
-                                                    child: Text(
-                                                      yuzde,
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        color: artis
-                                                            ? Colors.green[700]
-                                                            : Colors.red[700],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 2),
-                                                  Text(
-                                                    _fmt(oncekiCiro),
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                      color:
-                                                          Colors.blueGrey[600],
-                                                    ),
-                                                  ),
-                                                ],
-                                              );
-                                            },
-                                          ),
-                                        ],
-                                      ],
-                                    ),
+                                                    const SizedBox(height: 2),
+                                                    Text(_fmt(oncekiCiro),
+                                                        style: TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight:
+                                                                FontWeight.w500,
+                                                            color:
+                                                                Colors.blueGrey[
+                                                                    600])),
+                                                  ]);
+                                            }),
+                                          ],
+                                        ]),
                                     if (ciro > 0) ...[
                                       const SizedBox(width: 10),
                                       Container(
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
+                                            horizontal: 8, vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFF0288D1,
-                                          ).withOpacity(0.07),
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
+                                          color: const Color(0xFF0288D1)
+                                              .withOpacity(0.07),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
                                           border: Border.all(
-                                            color: const Color(
-                                              0xFF0288D1,
-                                            ).withOpacity(0.18),
-                                          ),
+                                              color: const Color(0xFF0288D1)
+                                                  .withOpacity(0.18)),
                                         ),
                                         child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.end,
-                                          children: [
-                                            Text(
-                                              'KDVsiz',
-                                              style: TextStyle(
-                                                color: Colors.grey[600],
-                                                fontSize: 9,
-                                              ),
-                                            ),
-                                            Text(
-                                              _fmt(
-                                                ciro / (1 + _kdvOrani / 100),
-                                              ),
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                                color: Color(0xFF0288D1),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Text('KDVsiz',
+                                                  style: TextStyle(
+                                                      color: Colors.grey[600],
+                                                      fontSize: 9)),
+                                              Text(
+                                                  _fmt(ciro /
+                                                      (1 + _kdvOrani / 100)),
+                                                  style: const TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color:
+                                                          Color(0xFF0288D1))),
+                                            ]),
                                       ),
                                     ],
-                                  ],
-                                ),
-                              ),
+                                  ]),
                             ),
-                          ],
-                        ),
+                          ),
+                        ]),
                       );
                     }),
                   ],
@@ -1088,17 +913,12 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
               ),
             ),
             const SizedBox(height: 16),
-
-            // ── ANA KASA BÖLÜMÜ ──────────────────────────────────────────
-            const Text(
-              'Ana Kasa Kalanları',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.black54,
-                letterSpacing: 0.5,
-              ),
-            ),
+            const Text('Ana Kasa Kalanları',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black54,
+                    letterSpacing: 0.5)),
             const SizedBox(height: 6),
             Container(
               decoration: BoxDecoration(
@@ -1106,225 +926,155 @@ class SubeOzetTablosuState extends State<SubeOzetTablosu>
                 borderRadius: BorderRadius.circular(14),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF1565C0).withOpacity(0.08),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
+                      color: const Color(0xFF1565C0).withOpacity(0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2))
                 ],
               ),
-              child: Column(
-                children: [
-                  // Toplam şerit
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF1565C0),
-                      borderRadius: BorderRadius.only(
+              child: Column(children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1565C0),
+                    borderRadius: BorderRadius.only(
                         topLeft: Radius.circular(14),
-                        topRight: Radius.circular(14),
-                      ),
-                    ),
-                    child: Row(
+                        topRight: Radius.circular(14)),
+                  ),
+                  child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Flexible(
-                          child: Text(
-                            'Genel Toplam Ana Kasa',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                            child: Text('Genel Toplam Ana Kasa',
+                                style: TextStyle(
+                                    color: Colors.white70, fontSize: 12),
+                                overflow: TextOverflow.ellipsis)),
                         const SizedBox(width: 8),
                         Flexible(
-                          child: Wrap(
-                            alignment: WrapAlignment.end,
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: [
-                              if (toplamUSD != 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 7,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
+                            child: Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            if (toplamUSD != 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
                                     color: const Color(0xFFFFF8E1),
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: Text(
+                                    borderRadius: BorderRadius.circular(3)),
+                                child: Text(
                                     '\$ ${toplamUSD.toStringAsFixed(0)}',
                                     style: const TextStyle(
-                                      color: Color(0xFFE65100),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              if (toplamEUR != 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 7,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
+                                        color: Color(0xFFE65100),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            if (toplamEUR != 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
                                     color: const Color(0xFFF3E5F5),
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: Text(
-                                    '€ ${toplamEUR.toStringAsFixed(0)}',
+                                    borderRadius: BorderRadius.circular(3)),
+                                child: Text('€ ${toplamEUR.toStringAsFixed(0)}',
                                     style: const TextStyle(
-                                      color: Color(0xFF6A1B9A),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              if (toplamGBP != 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 7,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
+                                        color: Color(0xFF6A1B9A),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            if (toplamGBP != 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
                                     color: const Color(0xFFE8F5E9),
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: Text(
-                                    '£ ${toplamGBP.toStringAsFixed(0)}',
+                                    borderRadius: BorderRadius.circular(3)),
+                                child: Text('£ ${toplamGBP.toStringAsFixed(0)}',
                                     style: const TextStyle(
-                                      color: Color(0xFF1B5E20),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              Text(
-                                _fmt(toplamTL),
+                                        color: Color(0xFF1B5E20),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            Text(_fmt(toplamTL),
                                 style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Şube satırları
-                  ..._subeVeriler.map((v) {
-                    final tl = v['anaKasaTL'] as double;
-                    final usd = v['anaKasaUSD'] as double;
-                    final eur = v['anaKasaEUR'] as double;
-                    final gbp = v['anaKasaGBP'] as double;
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.bold)),
+                          ],
+                        )),
+                      ]),
+                ),
+                ..._subeVeriler.map((v) {
+                  final tl = v['anaKasaTL'] as double;
+                  final usd = v['anaKasaUSD'] as double;
+                  final eur = v['anaKasaEUR'] as double;
+                  final gbp = v['anaKasaGBP'] as double;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
                         border: Border(
-                          bottom: BorderSide(
-                            color: Colors.grey.withOpacity(0.12),
-                          ),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              v['subeAd'] as String,
+                            bottom: BorderSide(
+                                color: Colors.grey.withOpacity(0.12)))),
+                    child: Row(children: [
+                      Expanded(
+                          child: Text(v['subeAd'] as String,
                               style: const TextStyle(fontSize: 13),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                              overflow: TextOverflow.ellipsis)),
+                      const SizedBox(width: 8),
+                      Wrap(spacing: 6, alignment: WrapAlignment.end, children: [
+                        if (usd != 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: const Color(0xFFFFF8E1),
+                                borderRadius: BorderRadius.circular(3)),
+                            child: Text(_fmtDoviz(usd, '\$'),
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFFE65100),
+                                    fontWeight: FontWeight.bold)),
                           ),
-                          const SizedBox(width: 8),
-                          Wrap(
-                            spacing: 6,
-                            alignment: WrapAlignment.end,
-                            children: [
-                              if (usd != 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFFFF8E1),
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: Text(
-                                    _fmtDoviz(usd, '\$'),
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Color(0xFFE65100),
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              if (eur != 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF3E5F5),
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: Text(
-                                    _fmtDoviz(eur, '€'),
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Color(0xFF6A1B9A),
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              if (gbp != 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE8F5E9),
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: Text(
-                                    _fmtDoviz(gbp, '£'),
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Color(0xFF1B5E20),
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              Text(
-                                _fmt(tl),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: tl >= 0
-                                      ? const Color(0xFF0C447C)
-                                      : Colors.red[700]!,
-                                ),
-                              ),
-                            ],
+                        if (eur != 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: const Color(0xFFF3E5F5),
+                                borderRadius: BorderRadius.circular(3)),
+                            child: Text(_fmtDoviz(eur, '€'),
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF6A1B9A),
+                                    fontWeight: FontWeight.bold)),
                           ),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-              ),
+                        if (gbp != 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: const Color(0xFFE8F5E9),
+                                borderRadius: BorderRadius.circular(3)),
+                            child: Text(_fmtDoviz(gbp, '£'),
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF1B5E20),
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        Text(_fmt(tl),
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: tl >= 0
+                                    ? const Color(0xFF0C447C)
+                                    : Colors.red[700]!)),
+                      ]),
+                    ]),
+                  );
+                }),
+              ]),
             ),
             const SizedBox(height: 32),
           ],

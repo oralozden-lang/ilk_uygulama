@@ -9,8 +9,6 @@ import 'dart:convert';
 import '../core/utils.dart';
 import '../screens/on_hazirlik_ekrani.dart';
 
-// ─── POS Kıyaslama Widget ─────────────────────────────────────────────────────
-
 class PosKiyaslamaWidget extends StatefulWidget {
   final List<String> subeler;
   const PosKiyaslamaWidget({this.subeler = const []});
@@ -27,13 +25,12 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
   String? _secilenSube;
   Map<String, String> _subeAdlari = {};
   Map<String, String> _uyeIsyeriNolari = {};
+  bool _subeYuklendi = false; // tekrar yüklemeyi önler
 
-  // Excel verisi
   List<Map<String, dynamic>> _excelSatirlar = [];
   bool _excelYuklendi = false;
   bool _excelYukleniyor = false;
 
-  // Karşılaştırma sonuçları
   List<Map<String, dynamic>> _sonuclar = [];
   bool _kiyaslaniyor = false;
 
@@ -43,37 +40,41 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
     _subeleriYukle();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Sekmeye her dönüşte şube listesini güncelle
-    _subeleriYukle();
-  }
+  // didChangeDependencies kaldırıldı — her sekme geçişinde Firestore sorgusu atıyordu
+  // Şubeler initState'de bir kez yüklenir, yeterli
 
   Future<void> _subeleriYukle() async {
-    final snap = await FirebaseFirestore.instance.collection('subeler').get();
-    final adlar = <String, String>{};
-    final uyeNolar = <String, String>{};
-    for (final d in snap.docs) {
-      adlar[d.id] = (d.data()['ad'] as String?) ?? d.id;
-      final uyeNo = d.data()['uyeIsyeriNo'] as String?;
-      if (uyeNo != null && uyeNo.isNotEmpty) uyeNolar[d.id] = uyeNo;
-    }
-    if (mounted) {
-      setState(() {
-        _subeAdlari = adlar;
-        _uyeIsyeriNolari = uyeNolar;
-        if (_secilenSube == null && adlar.isNotEmpty) {
-          _secilenSube = widget.subeler.isNotEmpty
-              ? widget.subeler.first
-              : adlar.keys.first;
-        }
-      });
-    }
+    if (_subeYuklendi) return; // zaten yüklendiyse tekrar gitme
+    try {
+      final snap = await FirebaseFirestore.instance.collection('subeler').get();
+      final adlar = <String, String>{};
+      final uyeNolar = <String, String>{};
+      for (final d in snap.docs) {
+        adlar[d.id] = (d.data()['ad'] as String?) ?? d.id;
+        final uyeNo = d.data()['uyeIsyeriNo'] as String?;
+        if (uyeNo != null && uyeNo.isNotEmpty) uyeNolar[d.id] = uyeNo;
+      }
+      if (mounted) {
+        setState(() {
+          _subeAdlari = adlar;
+          _uyeIsyeriNolari = uyeNolar;
+          _subeYuklendi = true;
+          if (_secilenSube == null && adlar.isNotEmpty) {
+            _secilenSube = widget.subeler.isNotEmpty
+                ? widget.subeler.first
+                : adlar.keys.first;
+          }
+        });
+      }
+    } catch (_) {}
   }
 
-  // Excel dosyasını yükle ve işle — web uyumlu
-  // Excel dosyasını SheetJS ile yükle — web uyumlu, hızlı
+  /// Dışarıdan zorla yenilemek gerekirse (örn. şube eklendi)
+  Future<void> yenile() async {
+    _subeYuklendi = false;
+    await _subeleriYukle();
+  }
+
   Future<void> _excelYukle() async {
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -92,7 +93,6 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
         _excelYuklendi = false;
       });
 
-      // SheetJS ile parse et (JavaScript)
       final completer = Completer<String>();
       final jsArray = js.JsObject(
         js.context['Uint8Array'] as js.JsFunction,
@@ -109,7 +109,6 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
 
       if (parsed['error'] != null) throw Exception(parsed['error']);
 
-      // {uyeNo: {gun: toplam}} -> List<Map>
       final data = parsed['data'] as Map<String, dynamic>;
       final satirlar = <Map<String, dynamic>>[];
       for (final uyeNo in data.keys) {
@@ -154,7 +153,6 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
 
     setState(() => _kiyaslaniyor = true);
 
-    // Excel'den bu şubenin gün bazlı toplamları
     final Map<String, double> excelGunluk = {};
     for (final s in _excelSatirlar) {
       if (s['uyeNo'] == uyeNo) {
@@ -174,46 +172,48 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
       return;
     }
 
-    // Günleri belirle
     final gunler = excelGunluk.keys.toList()..sort();
     final baslangic = gunler.first;
     final bitis = gunler.last;
 
-    // Firestore'dan bu aralıktaki kayıtları çek
-    final snap = await FirebaseFirestore.instance
-        .collection('subeler')
-        .doc(_secilenSube)
-        .collection('gunluk')
-        .where('tarih', isGreaterThanOrEqualTo: baslangic)
-        .where('tarih', isLessThanOrEqualTo: bitis)
-        .get();
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('subeler')
+          .doc(_secilenSube)
+          .collection('gunluk')
+          .where('tarih', isGreaterThanOrEqualTo: baslangic)
+          .where('tarih', isLessThanOrEqualTo: bitis)
+          .get();
 
-    final Map<String, double> programGunluk = {};
-    for (final doc in snap.docs) {
-      final tarih = doc.data()['tarih'] as String? ?? '';
-      final pos = (doc.data()['toplamPos'] as num? ?? 0).toDouble();
-      programGunluk[tarih] = pos;
+      final Map<String, double> programGunluk = {};
+      for (final doc in snap.docs) {
+        final tarih = doc.data()['tarih'] as String? ?? '';
+        final pos = (doc.data()['toplamPos'] as num? ?? 0).toDouble();
+        programGunluk[tarih] = pos;
+      }
+
+      final sonuclar = <Map<String, dynamic>>[];
+      for (final gun in gunler) {
+        final excel = excelGunluk[gun] ?? 0;
+        final program = programGunluk[gun] ?? 0;
+        final fark = excel - program;
+        sonuclar.add({
+          'gun': gun,
+          'excel': excel,
+          'program': program,
+          'fark': fark,
+          'eslesme': fark.abs() < 0.01,
+        });
+      }
+
+      if (mounted)
+        setState(() {
+          _sonuclar = sonuclar;
+          _kiyaslaniyor = false;
+        });
+    } catch (e) {
+      if (mounted) setState(() => _kiyaslaniyor = false);
     }
-
-    // Karşılaştır
-    final sonuclar = <Map<String, dynamic>>[];
-    for (final gun in gunler) {
-      final excel = excelGunluk[gun] ?? 0;
-      final program = programGunluk[gun] ?? 0;
-      final fark = excel - program;
-      sonuclar.add({
-        'gun': gun,
-        'excel': excel,
-        'program': program,
-        'fark': fark,
-        'eslesme': fark.abs() < 0.01,
-      });
-    }
-
-    setState(() {
-      _sonuclar = sonuclar;
-      _kiyaslaniyor = false;
-    });
   }
 
   String _fmtTL(double v) {
@@ -226,7 +226,6 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
     super.build(context);
     final aktifSubeler =
         widget.subeler.isNotEmpty ? widget.subeler : _subeAdlari.keys.toList();
-
     final eslesenSayi = _sonuclar.where((s) => s['eslesme'] == true).length;
     final farkliSayi = _sonuclar.where((s) => s['eslesme'] == false).length;
 
@@ -235,7 +234,6 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Şube seçici
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -254,9 +252,7 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
                     ),
                     items: aktifSubeler
                         .map((s) => DropdownMenuItem(
-                              value: s,
-                              child: Text(_subeAdlari[s] ?? s),
-                            ))
+                            value: s, child: Text(_subeAdlari[s] ?? s)))
                         .toList(),
                     onChanged: (v) => setState(() {
                       _secilenSube = v;
@@ -282,8 +278,6 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
             ),
           ),
           const SizedBox(height: 12),
-
-          // Excel yükleme
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -293,40 +287,33 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
                   const Text('Banka Excel Dosyası',
                       style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: _excelYukleniyor ? null : _excelYukle,
-                        icon: _excelYukleniyor
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.upload_file),
-                        label: Text(
-                            _excelYukleniyor ? 'Yükleniyor...' : 'Excel Yükle'),
-                        style: ElevatedButton.styleFrom(
+                  Row(children: [
+                    ElevatedButton.icon(
+                      onPressed: _excelYukleniyor ? null : _excelYukle,
+                      icon: _excelYukleniyor
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.upload_file),
+                      label: Text(
+                          _excelYukleniyor ? 'Yükleniyor...' : 'Excel Yükle'),
+                      style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF0288D1),
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      if (_excelYuklendi)
-                        Text(
-                          '✅ ${_excelSatirlar.length} gün yüklendi',
-                          style:
-                              TextStyle(color: Colors.green[700], fontSize: 13),
-                        ),
-                    ],
-                  ),
+                          foregroundColor: Colors.white),
+                    ),
+                    const SizedBox(width: 12),
+                    if (_excelYuklendi)
+                      Text('✅ ${_excelSatirlar.length} gün yüklendi',
+                          style: TextStyle(
+                              color: Colors.green[700], fontSize: 13)),
+                  ]),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 12),
-
-          // Kıyasla butonu
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -349,61 +336,48 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
               ),
             ),
           ),
-
-          // Sonuçlar
           if (_sonuclar.isNotEmpty) ...[
             const SizedBox(height: 16),
-            // Özet
-            Row(
-              children: [
-                Expanded(
+            Row(children: [
+              Expanded(
                   child: Card(
-                    color: Colors.green[50],
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          Text('$eslesenSayi',
-                              style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green[700])),
-                          Text('Eşleşen',
-                              style: TextStyle(color: Colors.green[700])),
-                        ],
-                      ),
-                    ),
-                  ),
+                color: Colors.green[50],
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(children: [
+                    Text('$eslesenSayi',
+                        style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[700])),
+                    Text('Eşleşen', style: TextStyle(color: Colors.green[700])),
+                  ]),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
+              )),
+              const SizedBox(width: 8),
+              Expanded(
                   child: Card(
-                    color: farkliSayi > 0 ? Colors.red[50] : Colors.green[50],
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          Text('$farkliSayi',
-                              style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: farkliSayi > 0
-                                      ? Colors.red[700]
-                                      : Colors.green[700])),
-                          Text('Farklı',
-                              style: TextStyle(
-                                  color: farkliSayi > 0
-                                      ? Colors.red[700]
-                                      : Colors.green[700])),
-                        ],
-                      ),
-                    ),
-                  ),
+                color: farkliSayi > 0 ? Colors.red[50] : Colors.green[50],
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(children: [
+                    Text('$farkliSayi',
+                        style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: farkliSayi > 0
+                                ? Colors.red[700]
+                                : Colors.green[700])),
+                    Text('Farklı',
+                        style: TextStyle(
+                            color: farkliSayi > 0
+                                ? Colors.red[700]
+                                : Colors.green[700])),
+                  ]),
                 ),
-              ],
-            ),
+              )),
+            ]),
             const SizedBox(height: 12),
-            // Gün bazlı liste
             ..._sonuclar.map((s) {
               final eslesme = s['eslesme'] as bool;
               final gun = s['gun'] as String;
@@ -414,7 +388,6 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
               final excel = s['excel'] as double;
               final program = s['program'] as double;
               final fark = s['fark'] as double;
-              // Tarihi DateTime'a çevir
               final tarihParts = gun.split('-');
               final tarihDt = tarihParts.length == 3
                   ? DateTime(int.parse(tarihParts[0]), int.parse(tarihParts[1]),
@@ -429,16 +402,13 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
                         ? Colors.green[50]
                         : Colors.red[50],
                 child: ListTile(
-                  leading: Icon(
-                    eslesme ? Icons.check_circle : Icons.error,
-                    color: eslesme ? Colors.green[700] : Colors.red[700],
-                  ),
+                  leading: Icon(eslesme ? Icons.check_circle : Icons.error,
+                      color: eslesme ? Colors.green[700] : Colors.red[700]),
                   title: Text(gunGoster,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text(
-                    'Banka: ${_fmtTL(excel)}  •  Program: ${_fmtTL(program)}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
+                      'Banka: ${_fmtTL(excel)}  •  Program: ${_fmtTL(program)}',
+                      style: const TextStyle(fontSize: 12)),
                   trailing: eslesme
                       ? Text('✓',
                           style: TextStyle(
@@ -456,16 +426,15 @@ class PosKiyaslamaWidgetState extends State<PosKiyaslamaWidget>
                   onTap: tarihDt == null || _secilenSube == null
                       ? null
                       : () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => OnHazirlikEkrani(
-                                subeKodu: _secilenSube!,
-                                subeler: widget.subeler,
-                                gecmisGunHakki: -1,
-                                baslangicTarihi: tarihDt,
-                              ),
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => OnHazirlikEkrani(
+                              subeKodu: _secilenSube!,
+                              subeler: widget.subeler,
+                              gecmisGunHakki: -1,
+                              baslangicTarihi: tarihDt,
                             ),
-                          ),
+                          )),
                 ),
               );
             }),

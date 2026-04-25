@@ -4,18 +4,33 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../raporlar_ekrani.dart';
 import '../../widgets/sube_ozet_tablosu.dart';
 
-class RaporlarTab extends StatelessWidget {
+class RaporlarTab extends StatefulWidget {
   final bool merkziGiderGor;
   const RaporlarTab({super.key, this.merkziGiderGor = true});
 
   @override
+  State<RaporlarTab> createState() => _RaporlarTabState();
+}
+
+class _RaporlarTabState extends State<RaporlarTab> {
+  late Future<List<String>> _subelerGelecek;
+
+  @override
+  void initState() {
+    super.initState();
+    _subelerGelecek = FirebaseFirestore.instance
+        .collection('subeler')
+        .get()
+        .then((snap) => snap.docs.map((d) => d.id).toList());
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<String>>(
-      future: FirebaseFirestore.instance
-          .collection('subeler')
-          .get()
-          .then((snap) => snap.docs.map((d) => d.id).toList()),
+      future: _subelerGelecek, // sabit referans — rebuild'de tekrar çağrılmaz
       builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
         final subeler = snap.data ?? [];
         return DefaultTabController(
           length: 2,
@@ -40,7 +55,7 @@ class RaporlarTab extends StatelessWidget {
                   children: [
                     RaporlarWidget(
                       subeler: subeler,
-                      merkziGiderGor: merkziGiderGor,
+                      merkziGiderGor: widget.merkziGiderGor,
                     ),
                     SubeOzetTablosu(subeler: subeler),
                   ],
