@@ -651,6 +651,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     try {
       final tarihKey = _tarihKey(_secilenTarih);
       final data = _otomatikKayitVerisi();
+      // ignore: avoid_print
+      print('KAYIT[$tarihKey] pulseKiyas: ${data['pulseKiyasVerileri']}');
       await FirebaseFirestore.instance
           .collection('subeler')
           .doc(widget.subeKodu)
@@ -3543,7 +3545,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       confirmText: 'Seç',
     );
     if (picked != null && picked != _secilenTarih) {
-      // Eski tarihteki kaydedilmemiş değişiklikleri kaydet (await ile — race condition önle)
+      // Önce devam eden kayıt beklenir: eski _otomatikKaydet tamamlanmadan
+      // _tarihOncesiKaydet çalışırsa eski veri daha sonra üzerine yazabilir.
+      while (_otomatikKaydediliyor && mounted) {
+        await Future.delayed(const Duration(milliseconds: 30));
+      }
+      // Kaydedilmemiş değişiklik varsa şimdi kaydet (tüm paralel yazma bitti)
       await _tarihOncesiKaydet();
 
       await _kilitBirak();
@@ -3606,6 +3613,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           _degisiklikVar = false;
           _yukleniyor = false;
         });
+      // Veri yükleme bittiğinden sonra listener'lar tarafından tetiklenen
+      // değişiklikleri geri sıfırla — tarih değişimi sırasında state temizdir kalsin
+      if (mounted && !_yukleniyor && !_degisiklikVar) {
+        // Listener callback'leştirildi ise, önceki duruma dön
+        if (mounted) setState(() => _degisiklikVar = false);
+      }
     }
   }
 
@@ -4905,22 +4918,28 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       // Pulse kıyas verileri yükle — önce temizle (eski tarih kalıntısı önle)
       for (var c in _pulseKiyasCtrl.values) c.clear();
       for (var c in _myDomKiyasCtrl.values) c.clear();
+      // Otomatik okuma verilerini temizle
+      _myDominosOkunan.clear();
       final pulseKiyas =
           (data['pulseKiyasVerileri'] as Map<String, dynamic>?) ?? {};
+      // ignore: avoid_print
+      print('YUKLE[${data['tarih']}] pulseKiyas: $pulseKiyas');
       for (var e in pulseKiyas.entries) {
         _pulseKiyasCtrl.putIfAbsent(e.key, () => TextEditingController());
         _pulseKiyasCtrl[e.key]!.text = e.value.toString();
       }
       // My Dominos kıyas verileri yükle
+      // ÖNEMLI: Firestore'dan gelen myDomKiyasVerileri sadece manuel girişlerdir,
+      // otomatik okunan verileri içermez. Otomatik okunan veriler sadece
+      // _pulseOkundu/myDomOkundu flag'ları ile tanımlanır.
       final myDomKiyas =
           (data['myDomKiyasVerileri'] as Map<String, dynamic>?) ?? {};
       for (var e in myDomKiyas.entries) {
         _myDomKiyasCtrl.putIfAbsent(e.key, () => TextEditingController());
         _myDomKiyasCtrl[e.key]!.text = e.value.toString();
-        // _myDominosOkunan da güncelle
-        final val = double.tryParse(
-            e.value.toString().replaceAll('.', '').replaceAll(',', '.'));
-        if (val != null && val > 0) _myDominosOkunan[e.key] = val;
+        // Not: _myDominosOkunan map'ine YAZILMIYOR çünkü bu veriler manuel giriş
+        // Otomatik okunan veriler yalnızca _myDomOkundu=true olduğunda
+        // _myDominosResmiOku() tarafından set edilir.
       }
       if (myDomKiyas.isNotEmpty) _myDominosYuklendi = true;
       _pulseKontrolOnaylandi = data['pulseKontrolOnaylandi'] == true;
@@ -7153,7 +7172,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
   Future<void> _tarihDegistir(int gunFarki) async {
     // İleri git: kapanmamış günden sonrasına geçilemez (ileri ok zaten pasif)
     // Geri git: serbest — kapanmamış günden geriye gidilebilir
-    // Değişiklik varsa önce otomatik kaydet (timer beklemeden)
+    // Önce devam eden kayıt beklenir: eski _otomatikKaydet tamamlanmadan
+    // _tarihOncesiKaydet çalışırsa eski veri daha sonra üzerine yazabilir.
+    while (_otomatikKaydediliyor && mounted) {
+      await Future.delayed(const Duration(milliseconds: 30));
+    }
+    // Kaydedilmemiş değişiklik varsa şimdi kaydet (tüm paralel yazma bitti)
     await _tarihOncesiKaydet();
     if (!await _degisiklikUyar(gecisMetni: 'Başka tarihe geçmeden')) return;
     final yeniTarih = _secilenTarih.add(Duration(days: gunFarki));
