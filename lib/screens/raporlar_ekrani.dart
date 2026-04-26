@@ -1,4 +1,4 @@
-import 'ozet_ekrani.dart';
+import 'on_hazirlik_ekrani.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -16,7 +16,7 @@ class RaporlarEkrani extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F7FA),
         appBar: AppBar(
@@ -43,6 +43,7 @@ class RaporlarEkrani extends StatelessWidget {
             tabs: [
               Tab(icon: Icon(Icons.bar_chart), text: 'Dönem Raporu'),
               Tab(icon: Icon(Icons.store, size: 18), text: 'Şube Özet'),
+              Tab(icon: Icon(Icons.payment, size: 18), text: 'Ödeme Kanalları'),
             ],
           ),
         ),
@@ -50,6 +51,7 @@ class RaporlarEkrani extends StatelessWidget {
           children: [
             RaporlarWidget(subeler: subeler),
             SubeOzetTablosu(subeler: subeler),
+            OdemeKanallariWidget(subeler: subeler),
           ],
         ),
       ),
@@ -133,14 +135,11 @@ class RaporlarWidgetState extends State<RaporlarWidget>
     _ilkYukle();
   }
 
-  /// Tüm başlangıç verilerini paralel çeker, sonra raporu getirir
+  /// Paralel başlatır — şube adları beklenmeden rapor hemen çekilir
   Future<void> _ilkYukle() async {
-    // Şube adları + gider türleri paralel
-    await Future.wait([
-      _subeAdlariniYukle(),
-      _giderTurleriYukle(),
-    ]);
-    if (mounted) _yukle();
+    _subeAdlariniYukle(); // await yok — sadece görüntüleme için
+    _giderTurleriYukle(); // await yok
+    if (mounted) _yukle(); // hemen başla
   }
 
   @override
@@ -922,11 +921,12 @@ class RaporlarWidgetState extends State<RaporlarWidget>
                       Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => OzetEkrani(
+                            builder: (_) => OnHazirlikEkrani(
                               subeKodu: subeId,
-                              baslangicTarihi: dt,
                               subeler: widget.subeler,
+                              baslangicTarihi: dt,
                               gecmisGunHakki: -1,
+                              initialTabIndex: 5, // Özet & Kapat sekmesi
                             ),
                           ));
                     },
@@ -1633,6 +1633,545 @@ class RaporlarWidgetState extends State<RaporlarWidget>
               ]),
             )),
       ],
+    );
+  }
+}
+
+// ─── Ödeme Kanalları Widget ──────────────────────────────────────────────────
+
+class OdemeKanallariWidget extends StatefulWidget {
+  final List<String> subeler;
+  const OdemeKanallariWidget({super.key, required this.subeler});
+
+  @override
+  State<OdemeKanallariWidget> createState() => _OdemeKanallariWidgetState();
+}
+
+class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  int _secilenYil = DateTime.now().year;
+  int _secilenAy = DateTime.now().month;
+  String? _secilenSube;
+  bool _yukleniyor = false;
+
+  Map<String, String> _subeAdlari = {};
+  // Kanallar: Firestore'dan sabit liste
+  List<Map<String, dynamic>> _kanallar = []; // {key, ad, tip: 'yemek'|'online'}
+  // Veri: tarih → {kanalKey → tutar}
+  Map<String, Map<String, double>> _gunVerileri = {};
+  // Tarihler sıralı
+  List<String> _tarihler = [];
+
+  final List<String> _aylar = [
+    'Ocak',
+    'Şubat',
+    'Mart',
+    'Nisan',
+    'Mayıs',
+    'Haziran',
+    'Temmuz',
+    'Ağustos',
+    'Eylül',
+    'Ekim',
+    'Kasım',
+    'Aralık',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _subeAdlariniYukle();
+    _kanallarYukle();
+  }
+
+  Future<void> _subeAdlariniYukle() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('subeler').get();
+      if (!mounted) return;
+      setState(() {
+        _subeAdlari = {
+          for (var d in snap.docs) d.id: (d.data()['ad'] as String?) ?? d.id
+        };
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _kanallarYukle() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('odemeyontemleri')
+          .orderBy('sira')
+          .get();
+      if (!mounted) return;
+      final liste = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
+        final tip = (doc.data()['tip'] as String?) ?? '';
+        if (tip == 'yemek' || tip == 'online') {
+          liste.add({
+            'key': doc.id,
+            'ad': (doc.data()['ad'] as String?) ?? doc.id,
+            'tip': tip,
+          });
+        }
+      }
+      setState(() => _kanallar = liste);
+    } catch (_) {}
+  }
+
+  List<String> get _aktifSubeler =>
+      widget.subeler.isNotEmpty ? widget.subeler : _subeAdlari.keys.toList();
+
+  Future<void> _yukle() async {
+    if (!mounted) return;
+    setState(() {
+      _yukleniyor = true;
+      _gunVerileri = {};
+      _tarihler = [];
+    });
+
+    try {
+      final bas =
+          '${_secilenYil.toString().padLeft(4, '0')}-${_secilenAy.toString().padLeft(2, '0')}-01';
+      final sonGun = DateTime(_secilenYil, _secilenAy + 1, 0).day;
+      final bit =
+          '${_secilenYil.toString().padLeft(4, '0')}-${_secilenAy.toString().padLeft(2, '0')}-${sonGun.toString().padLeft(2, '0')}';
+
+      final hedefSubeler =
+          _secilenSube != null ? [_secilenSube!] : _aktifSubeler;
+
+      final futures = hedefSubeler.map((sube) async {
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('subeler')
+              .doc(sube)
+              .collection('gunluk')
+              .where('tarih', isGreaterThanOrEqualTo: bas)
+              .where('tarih', isLessThanOrEqualTo: bit)
+              .orderBy('tarih')
+              .get();
+          return snap.docs.map((d) => {...d.data(), '_subeId': sube}).toList();
+        } catch (_) {
+          return <Map<String, dynamic>>[];
+        }
+      });
+
+      final results = await Future.wait(futures);
+      final tumKayitlar = <Map<String, dynamic>>[];
+      for (final liste in results) tumKayitlar.addAll(liste);
+      tumKayitlar.sort(
+          (a, b) => (a['tarih'] as String).compareTo(b['tarih'] as String));
+
+      // Gün bazlı veri oluştur
+      final gunVerileri = <String, Map<String, double>>{};
+      final subeGunMap =
+          <String, String>{}; // tarih → subeId (tek şube modunda)
+
+      for (final k in tumKayitlar) {
+        final tarih = k['tarih'] as String;
+        final subeId = k['_subeId'] as String;
+        final pulse = (k['pulseKiyasVerileri'] as Map?) ?? {};
+
+        gunVerileri[tarih] ??= {'_subeId': 0}; // subeId ayrı sakla
+        subeGunMap[tarih] = subeId;
+
+        for (final kanal in _kanallar) {
+          final key = kanal['key'] as String;
+          final tip = kanal['tip'] as String;
+
+          double tutar = 0;
+          if (tip == 'yemek') {
+            tutar = (pulse['yemek_$key'] as num? ?? 0).toDouble();
+          } else {
+            tutar = (pulse[key] as num? ?? 0).toDouble();
+          }
+          gunVerileri[tarih]![key] = (gunVerileri[tarih]![key] ?? 0) + tutar;
+        }
+      }
+
+      // subeId'yi ayrı map'te tut
+      if (!mounted) return;
+      setState(() {
+        _gunVerileri = gunVerileri;
+        _tarihler = gunVerileri.keys.toList()..sort();
+        _yukleniyor = false;
+        // subeGunMap'i sakla
+        _subeGunMap = subeGunMap;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _yukleniyor = false);
+    }
+  }
+
+  Map<String, String> _subeGunMap = {};
+
+  String _fmt(double v) {
+    if (v <= 0) return '—';
+    final parts = v.toStringAsFixed(2).split('.');
+    final buf = StringBuffer();
+    for (int i = 0; i < parts[0].length; i++) {
+      if (i > 0 && (parts[0].length - i) % 3 == 0) buf.write('.');
+      buf.write(parts[0][i]);
+    }
+    return '${buf.toString()},${parts[1]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+
+    // Kanal grupları
+    final yemekKanallar = _kanallar.where((k) => k['tip'] == 'yemek').toList();
+    final onlineKanallar =
+        _kanallar.where((k) => k['tip'] == 'online').toList();
+
+    // Dönem toplamları
+    final Map<String, double> kanalToplamlari = {};
+    for (final tarih in _tarihler) {
+      final gun = _gunVerileri[tarih] ?? {};
+      for (final kanal in _kanallar) {
+        final key = kanal['key'] as String;
+        kanalToplamlari[key] = (kanalToplamlari[key] ?? 0) + (gun[key] ?? 0);
+      }
+    }
+
+    const double colW = 90.0;
+    const double tarihW = 72.0;
+    const double rowH = 36.0;
+    const double baslikH = 44.0;
+    const double grupBaslikH = 28.0;
+
+    Widget colBaslik(String label, {Color? renk}) => SizedBox(
+          width: colW,
+          child: Text(label,
+              style: TextStyle(
+                  color: renk ?? Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11),
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis),
+        );
+
+    Widget hucre(String deger, {Color? renk, bool bold = false}) => SizedBox(
+          width: colW,
+          child: Text(deger,
+              style: TextStyle(
+                  fontSize: 11,
+                  color: deger == '—'
+                      ? Colors.grey[400]
+                      : (renk ?? Colors.black87),
+                  fontWeight: bold ? FontWeight.bold : FontWeight.normal),
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis),
+        );
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Filtre kartı
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(
+                    child: DropdownButtonFormField<int>(
+                  value: _secilenAy,
+                  decoration: const InputDecoration(
+                      labelText: 'Ay',
+                      border: OutlineInputBorder(),
+                      isDense: true),
+                  items: List.generate(
+                      12,
+                      (i) => DropdownMenuItem(
+                          value: i + 1, child: Text(_aylar[i]))),
+                  onChanged: (v) => setState(() => _secilenAy = v!),
+                )),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: DropdownButtonFormField<int>(
+                  value: _secilenYil,
+                  decoration: const InputDecoration(
+                      labelText: 'Yıl',
+                      border: OutlineInputBorder(),
+                      isDense: true),
+                  items: List.generate(5, (i) => DateTime.now().year - i)
+                      .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
+                      .toList(),
+                  onChanged: (v) => setState(() => _secilenYil = v!),
+                )),
+              ]),
+              if (_aktifSubeler.length > 1) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String?>(
+                  value: _secilenSube,
+                  decoration: const InputDecoration(
+                      labelText: 'Şube',
+                      border: OutlineInputBorder(),
+                      isDense: true),
+                  items: [
+                    const DropdownMenuItem(
+                        value: null, child: Text('Tüm Şubeler')),
+                    ..._aktifSubeler.map((s) => DropdownMenuItem(
+                        value: s, child: Text(_subeAdlari[s] ?? s))),
+                  ],
+                  onChanged: (v) => setState(() => _secilenSube = v),
+                ),
+              ],
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _yukle,
+                  icon: _yukleniyor
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.search),
+                  label: const Text('Raporu Getir'),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0288D1),
+                      foregroundColor: Colors.white),
+                ),
+              ),
+            ]),
+          ),
+        ),
+
+        if (_kanallar.isEmpty && !_yukleniyor)
+          const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(
+                child: Text('Ödeme yöntemleri yüklenemedi.',
+                    style: TextStyle(color: Colors.grey))),
+          ),
+
+        if (_tarihler.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2))
+                ],
+              ),
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // Sol: sabit tarih sütunu
+                Column(children: [
+                  Container(
+                    width: tarihW,
+                    height: baslikH + grupBaslikH,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF0288D1),
+                      borderRadius:
+                          BorderRadius.only(topLeft: Radius.circular(14)),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    alignment: Alignment.centerLeft,
+                    child: const Text('Tarih',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12)),
+                  ),
+                  ..._tarihler.asMap().entries.map((e) {
+                    final idx = e.key;
+                    final tarih = e.value;
+                    final subeId = _subeGunMap[tarih] ??
+                        (_secilenSube ??
+                            (_aktifSubeler.isNotEmpty
+                                ? _aktifSubeler.first
+                                : ''));
+                    final parcalar = tarih.split('-');
+                    final gorunen = parcalar.length == 3
+                        ? '${parcalar[2]}.${parcalar[1]}.${parcalar[0].substring(2)}'
+                        : tarih;
+                    return GestureDetector(
+                      onTap: () {
+                        if (parcalar.length != 3) return;
+                        final dt = DateTime(int.parse(parcalar[0]),
+                            int.parse(parcalar[1]), int.parse(parcalar[2]));
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => OnHazirlikEkrani(
+                                subeKodu: subeId,
+                                subeler: widget.subeler,
+                                baslangicTarihi: dt,
+                                gecmisGunHakki: -1,
+                                initialTabIndex: 0, // POS & Yemek Kartı sekmesi
+                              ),
+                            ));
+                      },
+                      child: Container(
+                        width: tarihW,
+                        height: rowH,
+                        color: idx % 2 == 0 ? Colors.grey[50] : Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(children: [
+                          Expanded(
+                              child: Text(gorunen,
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500))),
+                          Icon(Icons.chevron_right,
+                              size: 12, color: Colors.grey[400]),
+                        ]),
+                      ),
+                    );
+                  }),
+                  // Toplam satırı
+                  Container(
+                    width: tarihW,
+                    height: rowH,
+                    color: const Color(0xFF0288D1),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    alignment: Alignment.centerLeft,
+                    child: const Text('TOPLAM',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10)),
+                  ),
+                ]),
+
+                // Sağ: yatay kaydırmalı kanal sütunları
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Grup başlıkları
+                          Row(children: [
+                            if (yemekKanallar.isNotEmpty)
+                              Container(
+                                width: colW * yemekKanallar.length +
+                                    8.0 * (yemekKanallar.length - 1) +
+                                    8,
+                                height: grupBaslikH,
+                                color: const Color(0xFF2E7D32),
+                                alignment: Alignment.center,
+                                child: const Text('YEMEK KARTLARI',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10,
+                                        letterSpacing: 0.5)),
+                              ),
+                            if (onlineKanallar.isNotEmpty)
+                              Container(
+                                width: colW * onlineKanallar.length +
+                                    8.0 * (onlineKanallar.length - 1) +
+                                    8,
+                                height: grupBaslikH,
+                                color: const Color(0xFF1565C0),
+                                alignment: Alignment.center,
+                                child: const Text('ONLİNE ÖDEMELER',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10,
+                                        letterSpacing: 0.5)),
+                              ),
+                          ]),
+
+                          // Kanal başlıkları
+                          Container(
+                            height: baslikH,
+                            color: const Color(0xFF0288D1),
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Row(children: [
+                              ..._kanallar.map((k) => Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: colBaslik(k['ad'] as String,
+                                        renk: (k['tip'] == 'yemek')
+                                            ? const Color(0xFFA5D6A7)
+                                            : const Color(0xFF90CAF9)),
+                                  )),
+                            ]),
+                          ),
+
+                          // Gün satırları
+                          ..._tarihler.asMap().entries.map((e) {
+                            final idx = e.key;
+                            final tarih = e.value;
+                            final gun = _gunVerileri[tarih] ?? {};
+                            return Container(
+                              height: rowH,
+                              color:
+                                  idx % 2 == 0 ? Colors.grey[50] : Colors.white,
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: _kanallar.map((k) {
+                                  final key = k['key'] as String;
+                                  final val = gun[key] ?? 0;
+                                  final isYemek = k['tip'] == 'yemek';
+                                  return Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: hucre(_fmt(val),
+                                        renk: val > 0
+                                            ? (isYemek
+                                                ? const Color(0xFF2E7D32)
+                                                : const Color(0xFF1565C0))
+                                            : null),
+                                  );
+                                }).toList(),
+                              ),
+                            );
+                          }),
+
+                          // Toplam satırı
+                          Container(
+                            height: rowH,
+                            color: const Color(0xFF0288D1),
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: _kanallar.map((k) {
+                                final key = k['key'] as String;
+                                final toplam = kanalToplamlari[key] ?? 0;
+                                return Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: SizedBox(
+                                    width: colW,
+                                    child: Text(
+                                      _fmt(toplam),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: toplam > 0
+                                            ? Colors.white
+                                            : Colors.white38,
+                                      ),
+                                      textAlign: TextAlign.right,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ]),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 }

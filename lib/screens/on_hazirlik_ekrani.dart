@@ -35,7 +35,6 @@ import '../widgets/sube_ozet_tablosu.dart';
 import '../widgets/pos_kiyaslama_widget.dart';
 import 'gecmis_kayitlar_ekrani.dart';
 import 'raporlar_ekrani.dart';
-import 'ozet_ekrani.dart';
 import 'giris_ekrani.dart';
 // ─── Ön Hazırlık Ekranı ───────────────────────────────────────────────────────
 
@@ -45,6 +44,7 @@ class OnHazirlikEkrani extends StatefulWidget {
   final bool raporYetkisi;
   final DateTime? baslangicTarihi;
   final int gecmisGunHakki;
+  final int initialTabIndex; // Açılışta hangi sekme aktif olsun (varsayılan: 0)
   const OnHazirlikEkrani({
     super.key,
     required this.subeKodu,
@@ -52,6 +52,7 @@ class OnHazirlikEkrani extends StatefulWidget {
     this.raporYetkisi = false,
     this.baslangicTarihi,
     this.gecmisGunHakki = 0,
+    this.initialTabIndex = 0,
   });
   @override
   State<OnHazirlikEkrani> createState() => _OnHazirlikEkraniState();
@@ -169,7 +170,10 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(
+        length: 6,
+        vsync: this,
+        initialIndex: widget.initialTabIndex.clamp(0, 5));
 
     // Pulse/MyDom sekmesine geçince rebuild et — POS değerleri güncellensin
     int _sonTabIndex = 0;
@@ -6029,6 +6033,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         _toplamPos > 0 &&
         _toplamNakitTL > 0;
     if (!temelKosullar) return false;
+    // Döviz eklenmiş ama kur girilmemiş → kapanışa engel (her zaman, yönetici dahil)
+    final kurEksik = _dovizler.any((d) {
+      final kur = _parseDouble((d['kurCtrl'] as TextEditingController).text);
+      return kur <= 0;
+    });
+    if (kurEksik) return false;
     // Kullanıcı için limit kontrolleri — yönetici uyarı alır ama kapat yapabilir
     if (!yonetici) {
       if (_anaKasaLimitiAsildi) return false;
@@ -9249,6 +9259,1171 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
   // ── Kasa Özeti ──────────────────────────────────────────────────────────────
 
+  // ── Özet & Kapat Sekmesi — PDF ile aynı sıra ve koşullar ──────────────────
+  Widget _ozetKapatSekmesi() {
+    final gunlukSatis = _parseDouble(_gunlukSatisCtrl.text);
+    final toplamHarcama = _toplamHarcama;
+    final toplamAnaKasaHarcama = _toplamAnaKasaHarcama;
+    final toplamNakitCikis = _toplamNakitCikis;
+
+    // _bolumKart: özet&kapat için standart kart widget'ı
+    Widget bolumKart({
+      required Color renk,
+      required IconData ikon,
+      required String baslik,
+      String? toplam,
+      required Widget child,
+    }) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+                color: renk.withOpacity(0.1),
+                blurRadius: 8,
+                offset: const Offset(0, 2))
+          ],
+        ),
+        child: Column(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: renk,
+              borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(14), topRight: Radius.circular(14)),
+            ),
+            child: Row(children: [
+              Icon(ikon, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(baslik,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 1)),
+              const Spacer(),
+              if (toplam != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20)),
+                  child: Text(toplam,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16)),
+                ),
+            ]),
+          ),
+          Padding(padding: const EdgeInsets.all(14), child: child),
+        ]),
+      );
+    }
+
+    Widget kalemSatir(String label, String deger) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child:
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(label,
+                style: const TextStyle(color: Colors.black54, fontSize: 14)),
+            Text(deger,
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+          ]),
+        );
+
+    Widget kalemSatirRenk(String label, String deger, Color renk) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child:
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(label, style: TextStyle(color: renk, fontSize: 14)),
+            Text(deger,
+                style: TextStyle(
+                    color: renk, fontWeight: FontWeight.w600, fontSize: 14)),
+          ]),
+        );
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(children: [
+        // 1. GÜNLÜK SATIŞ
+        if (gunlukSatis > 0) ...[
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: Colors.red[700],
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.red.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3))
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(children: [
+                      Icon(Icons.trending_up, color: Colors.white, size: 20),
+                      SizedBox(width: 8),
+                      Text('GÜNLÜK SATIŞ',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              letterSpacing: 1)),
+                    ]),
+                    Text(_formatTL(gunlukSatis),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18)),
+                  ]),
+            ),
+          ),
+        ],
+
+        // 2. POS TOPLAMI
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0288D1),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                  color: const Color(0xFF0288D1).withOpacity(0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2))
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(children: [
+              const Icon(Icons.credit_card, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              const Text('POS TOPLAMI',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 1)),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Text(_formatTL(_toplamPos),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16)),
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // 3. ÖDEME KANALLARI (Pulse okunmuşsa)
+        _pulseKanallarWidgeti(),
+        if (_pulseOkundu) const SizedBox(height: 12),
+
+        // 4. HARCAMALAR (varsa)
+        if (toplamHarcama > 0) ...[
+          bolumKart(
+            renk: const Color(0xFFE53935),
+            ikon: Icons.receipt_long,
+            baslik: 'HARCAMALAR',
+            toplam: _formatTL(toplamHarcama),
+            child: Column(
+                children: _harcamalar
+                    .where((h) => _parseDouble(h.tutarCtrl.text) > 0)
+                    .map((h) => kalemSatir(
+                        h.aciklamaCtrl.text.isEmpty
+                            ? 'Harcama'
+                            : h.aciklamaCtrl.text,
+                        _formatTL(_parseDouble(h.tutarCtrl.text))))
+                    .toList()),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        // 5. KASA ÖZETİ
+        _kasaOzetiSection(),
+        const SizedBox(height: 12),
+
+        // 6. ANA KASA HARCAMALAR (varsa)
+        if (toplamAnaKasaHarcama > 0) ...[
+          bolumKart(
+            renk: const Color(0xFFE65100),
+            ikon: Icons.money_off,
+            baslik: 'ANA KASA HARCAMALAR',
+            toplam: _formatTL(toplamAnaKasaHarcama),
+            child: Column(
+                children: _anaKasaHarcamalari
+                    .where((h) => _parseDouble(h.tutarCtrl.text) > 0)
+                    .map((h) => kalemSatir(
+                        h.aciklamaCtrl.text.isEmpty
+                            ? 'Harcama'
+                            : h.aciklamaCtrl.text,
+                        _formatTL(_parseDouble(h.tutarCtrl.text))))
+                    .toList()),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        // 7. NAKİT ÇIKIŞ (varsa)
+        if (toplamNakitCikis > 0 ||
+            _nakitDovizler.any((d) =>
+                _parseDouble((d['ctrl'] as TextEditingController).text) >
+                0)) ...[
+          bolumKart(
+            renk: const Color(0xFF7B1FA2),
+            ikon: Icons.payments_outlined,
+            baslik: 'NAKİT ÇIKIŞ',
+            toplam: toplamNakitCikis > 0 ? _formatTL(toplamNakitCikis) : null,
+            child: Column(children: [
+              ..._nakitCikislar
+                  .where((h) => _parseDouble(h.tutarCtrl.text) > 0)
+                  .map((h) {
+                final aciklama = h.aciklamaCtrl.text.trim();
+                return kalemSatir(
+                    aciklama.isNotEmpty ? 'TL - $aciklama' : 'Nakit Çıkış TL',
+                    _formatTL(_parseDouble(h.tutarCtrl.text)));
+              }),
+              ..._nakitDovizler
+                  .where((d) =>
+                      _parseDouble((d['ctrl'] as TextEditingController).text) >
+                      0)
+                  .map((d) {
+                final cins = d['cins'] as String;
+                final sembol = cins == 'USD'
+                    ? r'$'
+                    : cins == 'EUR'
+                        ? '€'
+                        : cins == 'GBP'
+                            ? '£'
+                            : cins;
+                final aciklama = (d['aciklamaCtrl'] as TextEditingController?)
+                        ?.text
+                        .trim() ??
+                    '';
+                return kalemSatir(
+                  aciklama.isNotEmpty
+                      ? '$cins - $aciklama'
+                      : 'Nakit Çıkış $cins',
+                  '$sembol ${(d['ctrl'] as TextEditingController).text}',
+                );
+              }),
+            ]),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        // 8. ANA KASA ÖZETİ
+        _anaKasaSection(),
+        const SizedBox(height: 12),
+
+        // 9. TRANSFERLER (varsa)
+        Builder(builder: (context) {
+          final sadeceTrf = _transferler
+              .where(
+                  (t) => t['kategori'] == 'GİDEN' || t['kategori'] == 'GELEN')
+              .toList();
+          if (sadeceTrf.isEmpty) return const SizedBox.shrink();
+          final gidenler =
+              sadeceTrf.where((t) => t['kategori'] == 'GİDEN').toList();
+          final gelenler =
+              sadeceTrf.where((t) => t['kategori'] == 'GELEN').toList();
+          final toplamGiden = gidenler.fold(
+              0.0,
+              (s, t) =>
+                  s +
+                  _parseDouble((t['tutarCtrl'] as TextEditingController).text));
+          final toplamGelen = gelenler.fold(
+              0.0,
+              (s, t) =>
+                  s +
+                  _parseDouble((t['tutarCtrl'] as TextEditingController).text));
+          final netTransfer = toplamGelen - toplamGiden;
+
+          return bolumKart(
+            renk: const Color(0xFF546E7A),
+            ikon: Icons.swap_horiz,
+            baslik: 'TRANSFERLER',
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (gidenler.isNotEmpty) ...[
+                Text('GİDEN',
+                    style: TextStyle(
+                        color: Colors.red[700],
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12)),
+                ...gidenler.map((t) {
+                  final hedefAd =
+                      (t['hedefSubeAd'] as String?)?.isNotEmpty == true
+                          ? t['hedefSubeAd'] as String
+                          : (t['hedefSube'] as String? ?? '');
+                  final aciklama = t['aciklama'] as String? ?? '';
+                  final aciklamaTemiz = aciklama == hedefAd ? '' : aciklama;
+                  final label = [
+                    if (hedefAd.isNotEmpty) hedefAd,
+                    if (aciklamaTemiz.isNotEmpty) aciklamaTemiz
+                  ].join(' - ');
+                  return kalemSatirRenk(
+                      label.isEmpty ? 'Transfer' : label,
+                      '- ${_formatTL(_parseDouble((t['tutarCtrl'] as TextEditingController).text))}',
+                      Colors.red[700]!);
+                }),
+                const SizedBox(height: 4),
+              ],
+              if (gelenler.isNotEmpty) ...[
+                const Text('GELEN',
+                    style: TextStyle(
+                        color: Color(0xFF0288D1),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12)),
+                ...gelenler.map((t) {
+                  final kaynakAd =
+                      (t['kaynakSubeAd'] as String?)?.isNotEmpty == true
+                          ? t['kaynakSubeAd'] as String
+                          : (_subeAdlari[t['kaynakSube'] ?? ''] ??
+                              t['kaynakSube'] as String? ??
+                              '');
+                  final aciklama = t['aciklama'] as String? ?? '';
+                  final aciklamaTemiz = aciklama == kaynakAd ? '' : aciklama;
+                  final label = [
+                    if (kaynakAd.isNotEmpty) kaynakAd,
+                    if (aciklamaTemiz.isNotEmpty) aciklamaTemiz
+                  ].join(' - ');
+                  return kalemSatirRenk(
+                      label.isEmpty ? 'Transfer' : label,
+                      '+ ${_formatTL(_parseDouble((t['tutarCtrl'] as TextEditingController).text))}',
+                      const Color(0xFF0288D1));
+                }),
+                const SizedBox(height: 4),
+              ],
+              if (toplamGiden > 0 || toplamGelen > 0) ...[
+                const Divider(),
+                if (toplamGiden > 0)
+                  kalemSatirRenk('Toplam Giden', '- ${_formatTL(toplamGiden)}',
+                      Colors.red[700]!),
+                if (toplamGelen > 0)
+                  kalemSatirRenk('Toplam Gelen', '+ ${_formatTL(toplamGelen)}',
+                      const Color(0xFF0288D1)),
+                if (toplamGiden > 0 && toplamGelen > 0)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Net Transfer',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: netTransfer >= 0
+                                      ? const Color(0xFF0288D1)
+                                      : Colors.red[700])),
+                          Text(
+                              '${netTransfer >= 0 ? '+' : '-'} ${_formatTL(netTransfer.abs())}',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: netTransfer >= 0
+                                      ? const Color(0xFF0288D1)
+                                      : Colors.red[700])),
+                        ]),
+                  ),
+              ],
+            ]),
+          );
+        }),
+
+        // 10. DİĞER ALIMLAR (varsa)
+        Builder(builder: (context) {
+          final digerListesi = _digerAlimlar.where((da) {
+            final aciklama =
+                ((da['aciklamaCtrl'] as TextEditingController?)?.text ?? '')
+                    .trim();
+            final tutar = _parseDouble(
+                (da['tutarCtrl'] as TextEditingController?)?.text ?? '0');
+            return aciklama.isNotEmpty || tutar > 0;
+          }).toList();
+          if (digerListesi.isEmpty) return const SizedBox.shrink();
+          final toplam = digerListesi.fold(
+              0.0,
+              (s, da) =>
+                  s +
+                  _parseDouble(
+                      (da['tutarCtrl'] as TextEditingController?)?.text ??
+                          '0'));
+          return Column(children: [
+            const SizedBox(height: 12),
+            bolumKart(
+              renk: Colors.grey[700]!,
+              ikon: Icons.shopping_bag_outlined,
+              baslik: 'DİĞER ALIMLAR',
+              toplam: _formatTL(toplam),
+              child: Column(
+                  children: digerListesi
+                      .where((da) =>
+                          _parseDouble(
+                              (da['tutarCtrl'] as TextEditingController?)
+                                      ?.text ??
+                                  '0') >
+                          0)
+                      .map((da) {
+                final aciklama =
+                    ((da['aciklamaCtrl'] as TextEditingController?)?.text ?? '')
+                        .trim();
+                final tutar = _parseDouble(
+                    (da['tutarCtrl'] as TextEditingController?)?.text ?? '0');
+                return kalemSatir(
+                    aciklama.isEmpty ? '—' : aciklama, _formatTL(tutar));
+              }).toList()),
+            ),
+          ]);
+        }),
+
+        // Uyarılar
+        const SizedBox(height: 12),
+        if (_dovizLimitiAsildi)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[300]!)),
+            child: Row(children: [
+              Icon(Icons.error_outline, color: Colors.red[700], size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text(
+                      'Bankaya yatırılan döviz miktarı kasadakinden fazla!',
+                      style: TextStyle(
+                          color: Colors.red[700],
+                          fontWeight: FontWeight.w600))),
+            ]),
+          ),
+        if (_anaKasaLimitiAsildi)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+                color: Colors.deepOrange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.deepOrange[300]!)),
+            child: Row(children: [
+              Icon(Icons.account_balance_wallet,
+                  color: Colors.deepOrange[700], size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text(
+                      'Ana Kasa eksi kalıyor (${_formatTL(_anaKasaKalani)})!',
+                      style: TextStyle(
+                          color: Colors.deepOrange[800],
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12))),
+            ]),
+          ),
+        if (!_internetVar)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange[400]!)),
+            child: Row(children: [
+              Icon(Icons.wifi_off, color: Colors.orange[800], size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text('İnternet bağlantısı yok. Kayıt yapılamaz.',
+                      style: TextStyle(
+                          color: Colors.orange[900],
+                          fontWeight: FontWeight.w600))),
+            ]),
+          ),
+        const SizedBox(height: 32),
+      ]),
+    );
+  }
+
+  // ── PDF Oluştur — Özet & Kapat sekmesinden çağrılır ───────────────────────
+  Future<void> _pdfOlustur() async {
+    final pdf = pw.Document();
+    final subeAd = _subeAdlari[widget.subeKodu] ?? widget.subeKodu;
+    final font = await PdfGoogleFonts.notoSansRegular();
+    final fontBold = await PdfGoogleFonts.notoSansBold();
+
+    String fmt(double val) {
+      final parts = val.toStringAsFixed(2).split('.');
+      final buf = StringBuffer();
+      for (int i = 0; i < parts[0].length; i++) {
+        if (i > 0 && (parts[0].length - i) % 3 == 0) buf.write('.');
+        buf.write(parts[0][i]);
+      }
+      return '${buf.toString()},${parts[1]}';
+    }
+
+    final koyu =
+        pw.TextStyle(font: fontBold, fontFallback: [font], fontSize: 10);
+    final normal =
+        pw.TextStyle(font: font, fontFallback: [fontBold], fontSize: 10);
+
+    pw.Widget bolumBaslik(String baslik, PdfColor renk, {String? toplam}) =>
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          color: renk,
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(baslik,
+                  style: pw.TextStyle(
+                      font: fontBold, color: PdfColors.white, fontSize: 11)),
+              if (toplam != null)
+                pw.Text(toplam,
+                    style: pw.TextStyle(
+                        font: fontBold, color: PdfColors.white, fontSize: 11)),
+            ],
+          ),
+        );
+
+    pw.Widget satir(String label, String deger, {pw.TextStyle? style}) =>
+        pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 2),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(label, style: normal),
+              pw.Text(deger, style: style ?? koyu),
+            ],
+          ),
+        );
+
+    pw.Widget satirGirinti(String label, String deger, {PdfColor? renk}) =>
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(left: 10, top: 1, bottom: 1),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('  $label',
+                  style: pw.TextStyle(
+                      font: font,
+                      fontSize: 9,
+                      color: renk ?? PdfColors.grey700)),
+              pw.Text(deger,
+                  style: pw.TextStyle(
+                      font: fontBold,
+                      fontSize: 9,
+                      color: renk ?? PdfColors.grey700)),
+            ],
+          ),
+        );
+
+    // Pulse kanalları
+    final yemeklerPdf = <String, double>{};
+    final onlinelerPdf = <String, double>{};
+    for (final entry in _pulseKiyasCtrl.entries) {
+      final key = entry.key;
+      final val = _parseDouble(entry.value.text);
+      if (val <= 0) continue;
+      if (key.startsWith('yemek_')) {
+        yemeklerPdf[key.substring(6)] = val;
+      } else if (key != 'pulsePos' &&
+          key != 'pulseBrut' &&
+          key != 'pulseBanka') {
+        onlinelerPdf[key] = val;
+      }
+    }
+    final yemekToplamPdf = yemeklerPdf.values.fold(0.0, (s, v) => s + v);
+    final onlineToplamPdf = onlinelerPdf.values.fold(0.0, (s, v) => s + v);
+
+    final icerik = <pw.Widget>[
+      // Başlık
+      pw.Container(
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(10),
+        color: PdfColor.fromHex('#7B1F2E'),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('$subeAd Günlük Özet',
+                style: pw.TextStyle(
+                    font: fontBold, color: PdfColors.white, fontSize: 14)),
+            pw.Text(_tarihGoster(_secilenTarih),
+                style: pw.TextStyle(
+                    font: font, color: PdfColors.white, fontSize: 12)),
+          ],
+        ),
+      ),
+      pw.SizedBox(height: 8),
+
+      // 1. Günlük Satış
+      if (_parseDouble(_gunlukSatisCtrl.text) > 0)
+        pw.Container(
+          width: double.infinity,
+          color: PdfColors.red700,
+          child: pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('GÜNLÜK SATIŞ',
+                    style: pw.TextStyle(
+                        font: fontBold, color: PdfColors.white, fontSize: 12)),
+                pw.Text(fmt(_parseDouble(_gunlukSatisCtrl.text)),
+                    style: pw.TextStyle(
+                        font: fontBold, color: PdfColors.white, fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+      pw.SizedBox(height: 4),
+
+      // 2. POS
+      bolumBaslik('POS TOPLAMI', PdfColors.blueGrey700,
+          toplam: fmt(_toplamPos)),
+      pw.SizedBox(height: 4),
+
+      // 3. Ödeme Kanalları
+      if (_pulseOkundu &&
+          (yemeklerPdf.isNotEmpty || onlinelerPdf.isNotEmpty)) ...[
+        bolumBaslik('ÖDEME KANALLARI (Pulse)', PdfColor.fromHex('#006064')),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(6),
+          decoration:
+              pw.BoxDecoration(border: pw.Border.all(color: PdfColors.teal200)),
+          child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                if (yemeklerPdf.isNotEmpty) ...[
+                  pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text('Yemek Kartları',
+                            style: pw.TextStyle(
+                                font: fontBold,
+                                fontSize: 10,
+                                color: PdfColor.fromHex('#2E7D32'))),
+                        pw.Text(fmt(yemekToplamPdf),
+                            style: pw.TextStyle(
+                                font: fontBold,
+                                fontSize: 10,
+                                color: PdfColor.fromHex('#2E7D32'))),
+                      ]),
+                  ...yemeklerPdf.entries.map((e) => satirGirinti(
+                      e.key, fmt(e.value),
+                      renk: PdfColor.fromHex('#388E3C'))),
+                ],
+                if (onlinelerPdf.isNotEmpty) ...[
+                  if (yemeklerPdf.isNotEmpty) pw.SizedBox(height: 4),
+                  pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text('Online Ödemeler',
+                            style: pw.TextStyle(
+                                font: fontBold,
+                                fontSize: 10,
+                                color: PdfColor.fromHex('#1565C0'))),
+                        pw.Text(fmt(onlineToplamPdf),
+                            style: pw.TextStyle(
+                                font: fontBold,
+                                fontSize: 10,
+                                color: PdfColor.fromHex('#1565C0'))),
+                      ]),
+                  ...onlinelerPdf.entries.map((e) => satirGirinti(
+                      e.key, fmt(e.value),
+                      renk: PdfColor.fromHex('#1976D2'))),
+                ],
+              ]),
+        ),
+        pw.SizedBox(height: 4),
+      ],
+
+      // 4. Harcamalar
+      if (_toplamHarcama > 0) ...[
+        bolumBaslik('HARCAMALAR', PdfColors.red700,
+            toplam: fmt(_toplamHarcama)),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(6),
+          decoration:
+              pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300)),
+          child: pw.Column(
+              children: _harcamalar
+                  .where((h) => _parseDouble(h.tutarCtrl.text) > 0)
+                  .map((h) => satir(
+                      h.aciklamaCtrl.text.isEmpty
+                          ? 'Harcama'
+                          : h.aciklamaCtrl.text,
+                      fmt(_parseDouble(h.tutarCtrl.text))))
+                  .toList()),
+        ),
+        pw.SizedBox(height: 4),
+      ],
+
+      // 5. Kasa Özeti
+      bolumBaslik('KASA ÖZETİ', PdfColors.green700),
+      pw.SizedBox(height: 4),
+      pw.Container(
+        margin: const pw.EdgeInsets.only(bottom: 6),
+        padding: const pw.EdgeInsets.all(8),
+        decoration: pw.BoxDecoration(
+            color: PdfColors.blue50,
+            border: pw.Border.all(color: PdfColors.blue200),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6))),
+        child: pw
+            .Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Text('TL',
+              style: pw.TextStyle(
+                  font: fontBold,
+                  fontSize: 10,
+                  color: PdfColor.fromHex('#1565C0'))),
+          pw.SizedBox(height: 4),
+          satir('Banka Parası', fmt(_bankaParasi)),
+          if (_parseDouble(_devredenFlotCtrl.text) > 0)
+            satir('Devreden Flot', fmt(_parseDouble(_devredenFlotCtrl.text))),
+          if (_toplamHarcama > 0) satir('Harcamalar', fmt(_toplamHarcama)),
+          if (_flotTutari > 0) satir('Günlük Flot', fmt(_flotTutari)),
+          satir('Toplam Nakit', fmt(_toplamNakitTL)),
+          if (_kasaFarki.abs() >= 0.01)
+            pw.Container(
+              margin: const pw.EdgeInsets.symmetric(vertical: 4),
+              padding:
+                  const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              color: _kasaFarki >= 0 ? PdfColors.green600 : PdfColors.red600,
+              child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Kasa Farkı',
+                        style: pw.TextStyle(
+                            font: fontBold,
+                            fontSize: 10,
+                            color: PdfColors.white)),
+                    pw.Text(fmt(_kasaFarki),
+                        style: pw.TextStyle(
+                            font: fontBold,
+                            fontSize: 10,
+                            color: PdfColors.white)),
+                  ]),
+            ),
+          pw.Divider(color: PdfColors.blue200),
+          pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Günlük Kasa Kalanı',
+                    style: pw.TextStyle(
+                        font: fontBold,
+                        fontSize: 10,
+                        color: PdfColor.fromHex('#1565C0'))),
+                pw.Text(fmt(_gunlukKasaKalaniTL),
+                    style: pw.TextStyle(
+                        font: fontBold,
+                        fontSize: 10,
+                        color: _gunlukKasaKalaniTL >= 0
+                            ? PdfColor.fromHex('#1565C0')
+                            : PdfColors.red700)),
+              ]),
+        ]),
+      ),
+      pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        color: _gunlukKasaKalani >= 0 ? PdfColors.green700 : PdfColors.red700,
+        child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Günlük Toplam Kasa Kalanı',
+                  style: pw.TextStyle(
+                      font: fontBold, fontSize: 11, color: PdfColors.white)),
+              pw.Text(fmt(_gunlukKasaKalani),
+                  style: pw.TextStyle(
+                      font: fontBold, fontSize: 11, color: PdfColors.white)),
+            ]),
+      ),
+      pw.SizedBox(height: 6),
+
+      // 6. Ana Kasa Harcamalar
+      if (_toplamAnaKasaHarcama > 0) ...[
+        bolumBaslik('ANA KASA HARCAMALAR', PdfColors.orange700,
+            toplam: fmt(_toplamAnaKasaHarcama)),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(6),
+          decoration:
+              pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300)),
+          child: pw.Column(
+              children: _anaKasaHarcamalari
+                  .where((h) => _parseDouble(h.tutarCtrl.text) > 0)
+                  .map((h) => satir(
+                      h.aciklamaCtrl.text.isEmpty
+                          ? 'Harcama'
+                          : h.aciklamaCtrl.text,
+                      fmt(_parseDouble(h.tutarCtrl.text))))
+                  .toList()),
+        ),
+        pw.SizedBox(height: 4),
+      ],
+
+      // 7. Nakit Çıkış
+      if (_toplamNakitCikis > 0 ||
+          _nakitDovizler.any((d) =>
+              _parseDouble((d['ctrl'] as TextEditingController).text) > 0)) ...[
+        bolumBaslik('NAKİT ÇIKIŞ', PdfColor.fromHex('#7B1FA2'),
+            toplam: _toplamNakitCikis > 0 ? fmt(_toplamNakitCikis) : null),
+        ..._nakitCikislar
+            .where((h) => _parseDouble(h.tutarCtrl.text) > 0)
+            .map((h) {
+          final aciklama = h.aciklamaCtrl.text.trim();
+          return satir(
+              aciklama.isNotEmpty ? 'TL - $aciklama' : 'Nakit Çıkış TL',
+              fmt(_parseDouble(h.tutarCtrl.text)));
+        }),
+        ..._nakitDovizler
+            .where((d) =>
+                _parseDouble((d['ctrl'] as TextEditingController).text) > 0)
+            .map((d) {
+          final cins = d['cins'] as String;
+          final sembol = cins == 'USD'
+              ? r'$'
+              : cins == 'EUR'
+                  ? '€'
+                  : cins == 'GBP'
+                      ? '£'
+                      : cins;
+          final aciklama =
+              (d['aciklamaCtrl'] as TextEditingController?)?.text.trim() ?? '';
+          return satir(
+              aciklama.isNotEmpty ? '$cins - $aciklama' : 'Nakit Çıkış $cins',
+              '$sembol ${_parseDouble((d['ctrl'] as TextEditingController).text).toStringAsFixed(2)}');
+        }),
+        pw.SizedBox(height: 4),
+      ],
+
+      // 8. Ana Kasa Özeti
+      bolumBaslik('ANA KASA ÖZETİ', PdfColors.blue900,
+          toplam: fmt(_anaKasaKalani)),
+      pw.Container(
+        padding: const pw.EdgeInsets.all(6),
+        decoration:
+            pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300)),
+        child: pw.Column(children: [
+          pw.Container(
+            margin: const pw.EdgeInsets.only(bottom: 4),
+            padding: const pw.EdgeInsets.all(6),
+            decoration: pw.BoxDecoration(
+                color: PdfColors.blue50,
+                border: pw.Border.all(color: PdfColors.blue200),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6))),
+            child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('TL',
+                      style: pw.TextStyle(
+                          font: fontBold,
+                          fontSize: 10,
+                          color: PdfColor.fromHex('#1565C0'))),
+                  pw.SizedBox(height: 4),
+                  satir('Devreden Ana Kasa', fmt(_oncekiAnaKasaKalani)),
+                  satir('Günlük Kasa Kalanı (TL)', fmt(_gunlukKasaKalaniTL)),
+                  if (_parseDouble(_bankayaYatiranCtrl.text) > 0)
+                    satir('Bankaya Yatırılan',
+                        fmt(_parseDouble(_bankayaYatiranCtrl.text))),
+                  if (_toplamAnaKasaHarcama > 0)
+                    satir('Ana Kasa Harcamalar', fmt(_toplamAnaKasaHarcama)),
+                  if (_toplamNakitCikis > 0)
+                    satir('Nakit Çıkış', fmt(_toplamNakitCikis)),
+                  pw.Divider(color: PdfColors.blue200),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 4),
+                    color: _anaKasaKalani >= 0
+                        ? PdfColors.green700
+                        : PdfColors.red700,
+                    child: pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text('Ana Kasa Kalanı',
+                              style: pw.TextStyle(
+                                  font: fontBold,
+                                  fontSize: 10,
+                                  color: PdfColors.white)),
+                          pw.Text(fmt(_anaKasaKalani),
+                              style: pw.TextStyle(
+                                  font: fontBold,
+                                  fontSize: 10,
+                                  color: PdfColors.white)),
+                        ]),
+                  ),
+                ]),
+          ),
+        ]),
+      ),
+      pw.SizedBox(height: 6),
+
+      // 9. Transferler
+      if (_transferler.any(
+          (t) => t['kategori'] == 'GİDEN' || t['kategori'] == 'GELEN')) ...[
+        () {
+          final trf = _transferler
+              .where(
+                  (t) => t['kategori'] == 'GİDEN' || t['kategori'] == 'GELEN')
+              .toList();
+          double netT = 0;
+          for (final t in trf) {
+            final kat = t['kategori'] as String;
+            final tutar =
+                _parseDouble((t['tutarCtrl'] as TextEditingController).text);
+            if (kat == 'GELEN') netT += tutar;
+            if (kat == 'GİDEN') netT -= tutar;
+          }
+          return bolumBaslik('TRANSFERLER', PdfColors.blueGrey600,
+              toplam: '${netT >= 0 ? '+' : '-'} ${fmt(netT.abs())}');
+        }(),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(6),
+          decoration:
+              pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300)),
+          child: pw.Column(
+              children: _transferler
+                  .where((t) =>
+                      t['kategori'] == 'GİDEN' || t['kategori'] == 'GELEN')
+                  .map((t) {
+            final kat = t['kategori'] as String;
+            final isGiden = kat == 'GİDEN';
+            final renk = isGiden ? PdfColors.red700 : PdfColors.blue900;
+            final prefix = isGiden ? '- ' : '+ ';
+            final tutar =
+                _parseDouble((t['tutarCtrl'] as TextEditingController).text);
+            final aciklama = (t['aciklamaCtrl'] as TextEditingController).text;
+            final subeAd = isGiden
+                ? (t['hedefSubeAd'] as String? ?? '')
+                : (t['kaynakSubeAd'] as String? ?? '');
+            final label = [
+              kat,
+              if (subeAd.isNotEmpty) subeAd,
+              if (aciklama.isNotEmpty && aciklama != subeAd) aciklama
+            ].join(' - ');
+            return pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(vertical: 2),
+              child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(label,
+                        style: pw.TextStyle(
+                            font: fontBold, fontSize: 10, color: renk)),
+                    pw.Text('$prefix${fmt(tutar)}',
+                        style: pw.TextStyle(
+                            font: fontBold, fontSize: 10, color: renk)),
+                  ]),
+            );
+          }).toList()),
+        ),
+        pw.SizedBox(height: 4),
+      ],
+
+      // 10. Diğer Alımlar
+      if (_digerAlimlar.any((da) =>
+          _parseDouble((da['tutarCtrl'] as TextEditingController).text) >
+          0)) ...[
+        () {
+          final toplam = _digerAlimlar.fold(
+              0.0,
+              (s, da) =>
+                  s +
+                  _parseDouble(
+                      (da['tutarCtrl'] as TextEditingController).text));
+          return bolumBaslik('DİĞER ALIMLAR', PdfColors.grey,
+              toplam: fmt(toplam));
+        }(),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(6),
+          decoration:
+              pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300)),
+          child: pw.Column(
+              children: _digerAlimlar
+                  .where((da) =>
+                      _parseDouble(
+                          (da['tutarCtrl'] as TextEditingController).text) >
+                      0)
+                  .map((da) => satir(
+                        ((da['aciklamaCtrl'] as TextEditingController).text)
+                                .isEmpty
+                            ? '—'
+                            : (da['aciklamaCtrl'] as TextEditingController)
+                                .text,
+                        fmt(_parseDouble(
+                            (da['tutarCtrl'] as TextEditingController).text)),
+                      ))
+                  .toList()),
+        ),
+      ],
+    ];
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(16),
+        build: (context) {
+          final pageW = PdfPageFormat.a4.availableWidth - 32;
+          return pw.Center(
+            child: pw.FittedBox(
+              fit: pw.BoxFit.contain,
+              alignment: pw.Alignment.center,
+              child: pw.SizedBox(
+                width: pageW,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  mainAxisSize: pw.MainAxisSize.min,
+                  children: icerik,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (_) => pdf.save());
+  }
+
+  // ── Pulse Ödeme Kanalları — Özet & Kapat sekmesi için ─────────────────────
+  // pulseResmiOkundu=true ise yemek kartları ve online kanalları gösterir
+  Widget _pulseKanallarWidgeti() {
+    if (!_pulseOkundu) return const SizedBox.shrink();
+
+    // pulseKiyasCtrl'den yemek ve online kanalları ayır
+    final yemekler = <String, double>{};
+    final onlineler = <String, double>{};
+
+    for (final entry in _pulseKiyasCtrl.entries) {
+      final key = entry.key;
+      final val = _parseDouble(entry.value.text);
+      if (val <= 0) continue;
+      if (key.startsWith('yemek_')) {
+        final ad = key.substring(6);
+        yemekler[ad] = val;
+      } else if (key != 'pulsePos' &&
+          key != 'pulseBrut' &&
+          key != 'pulseBanka') {
+        // Online kanallar — rezerve key'ler hariç
+        onlineler[key] = val;
+      }
+    }
+
+    if (yemekler.isEmpty && onlineler.isEmpty) return const SizedBox.shrink();
+
+    final yemekToplam = yemekler.values.fold(0.0, (s, v) => s + v);
+    final onlineToplam = onlineler.values.fold(0.0, (s, v) => s + v);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+              color: const Color(0xFF00695C).withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Column(children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: const BoxDecoration(
+            color: Color(0xFF00695C),
+            borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(14), topRight: Radius.circular(14)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.account_balance_wallet_outlined,
+                color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            const Text('ÖDEME KANALLARI',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 1)),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Yemek Kartları
+            if (yemekler.isNotEmpty) ...[
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                const Text('Yemek Kartları',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Color(0xFF2E7D32))),
+                Text(_formatTL(yemekToplam),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Color(0xFF2E7D32))),
+              ]),
+              ...yemekler.entries.map((e) => Padding(
+                    padding: const EdgeInsets.only(left: 12, top: 3),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(e.key,
+                              style: TextStyle(
+                                  fontSize: 13, color: Colors.grey[700])),
+                          Text(_formatTL(e.value),
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w500)),
+                        ]),
+                  )),
+            ],
+            // Online Ödemeler
+            if (onlineler.isNotEmpty) ...[
+              if (yemekler.isNotEmpty) const SizedBox(height: 10),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                const Text('Online Ödemeler',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Color(0xFF1565C0))),
+                Text(_formatTL(onlineToplam),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Color(0xFF1565C0))),
+              ]),
+              ...onlineler.entries.map((e) => Padding(
+                    padding: const EdgeInsets.only(left: 12, top: 3),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(e.key,
+                              style: TextStyle(
+                                  fontSize: 13, color: Colors.grey[700])),
+                          Text(_formatTL(e.value),
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w500)),
+                        ]),
+                  )),
+            ],
+          ]),
+        ),
+      ]),
+    );
+  }
+
   Widget _kasaOzetiSection() {
     final devredenFlot = _parseDouble(_devredenFlotCtrl.text);
     final kasaFarki = _kasaFarki;
@@ -11940,34 +13115,19 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                 },
               ),
             IconButton(
-              icon: const Icon(Icons.summarize),
-              tooltip: 'Günlük Özet',
-              onPressed: () async {
-                if (_duzenlemeAcik) {
-                  if (!await _degisiklikUyar(gecisMetni: 'Özete geçmeden'))
-                    return;
-                }
+              icon: const Icon(Icons.picture_as_pdf),
+              tooltip: 'PDF',
+              onPressed: () {
                 if (!_gunuKapatildi) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Özeti görmek için önce günü kapatın.'),
+                      content: Text('PDF için önce günü kapatın.'),
                       backgroundColor: Colors.orange,
                     ),
                   );
                   return;
                 }
-                if (mounted)
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => OzetEkrani(
-                        subeKodu: widget.subeKodu,
-                        baslangicTarihi: _secilenTarih,
-                        subeler: widget.subeler,
-                        gecmisGunHakki: widget.gecmisGunHakki,
-                      ),
-                    ),
-                  );
+                _pdfOlustur();
               },
             ),
             PopupMenuButton<String>(
@@ -12480,500 +13640,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                               ),
                             ),
                             // ── Sekme 6: Özet & Kapat ──
-                            SingleChildScrollView(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                children: [
-                                  _kasaOzetiSection(),
-                                  const SizedBox(height: 12),
-                                  _anaKasaSection(),
-                                  const SizedBox(height: 12),
-                                  // ── Transferler (varsa) ──
-                                  Builder(builder: (context) {
-                                    final sadeceTrf = _transferler
-                                        .where((t) =>
-                                            t['kategori'] == 'GİDEN' ||
-                                            t['kategori'] == 'GELEN')
-                                        .toList();
-                                    if (sadeceTrf.isEmpty)
-                                      return const SizedBox.shrink();
-                                    final gidenler = sadeceTrf
-                                        .where((t) => t['kategori'] == 'GİDEN')
-                                        .toList();
-                                    final gelenler = sadeceTrf
-                                        .where((t) => t['kategori'] == 'GELEN')
-                                        .toList();
-                                    final toplamGiden = gidenler.fold(
-                                        0.0,
-                                        (s, t) =>
-                                            s +
-                                            _parseDouble((t['tutarCtrl']
-                                                    as TextEditingController)
-                                                .text));
-                                    final toplamGelen = gelenler.fold(
-                                        0.0,
-                                        (s, t) =>
-                                            s +
-                                            _parseDouble((t['tutarCtrl']
-                                                    as TextEditingController)
-                                                .text));
-                                    final netTransfer =
-                                        toplamGelen - toplamGiden;
-
-                                    Widget kalemRenk(String label, String deger,
-                                            Color renk) =>
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              vertical: 2),
-                                          child: Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment
-                                                      .spaceBetween,
-                                              children: [
-                                                Text(label,
-                                                    style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: renk)),
-                                                Text(deger,
-                                                    style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: renk,
-                                                        fontWeight:
-                                                            FontWeight.bold)),
-                                              ]),
-                                        );
-
-                                    return Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(14),
-                                        boxShadow: [
-                                          BoxShadow(
-                                              color: const Color(0xFF546E7A)
-                                                  .withOpacity(0.1),
-                                              blurRadius: 8,
-                                              offset: const Offset(0, 2))
-                                        ],
-                                      ),
-                                      child: Column(children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16, vertical: 10),
-                                          decoration: const BoxDecoration(
-                                            color: Color(0xFF546E7A),
-                                            borderRadius: BorderRadius.only(
-                                                topLeft: Radius.circular(14),
-                                                topRight: Radius.circular(14)),
-                                          ),
-                                          child: Row(children: [
-                                            const Icon(Icons.swap_horiz,
-                                                color: Colors.white, size: 18),
-                                            const SizedBox(width: 8),
-                                            const Text('TRANSFERLER',
-                                                style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 13,
-                                                    letterSpacing: 1)),
-                                          ]),
-                                        ),
-                                        Padding(
-                                          padding: const EdgeInsets.all(14),
-                                          child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                if (gidenler.isNotEmpty) ...[
-                                                  Text('GİDEN',
-                                                      style: TextStyle(
-                                                          color:
-                                                              Colors.red[700],
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontSize: 12)),
-                                                  ...gidenler.map((t) {
-                                                    final hedefAd = (t['hedefSubeAd']
-                                                                    as String?)
-                                                                ?.isNotEmpty ==
-                                                            true
-                                                        ? t['hedefSubeAd']
-                                                            as String
-                                                        : (t['hedefSube']
-                                                                as String? ??
-                                                            '');
-                                                    final aciklama =
-                                                        t['aciklama']
-                                                                as String? ??
-                                                            '';
-                                                    final aciklamaTemiz =
-                                                        aciklama == hedefAd ||
-                                                                aciklama ==
-                                                                    (t['hedefSube'] ??
-                                                                        '')
-                                                            ? ''
-                                                            : aciklama;
-                                                    final label = [
-                                                      if (hedefAd.isNotEmpty)
-                                                        hedefAd,
-                                                      if (aciklamaTemiz
-                                                          .isNotEmpty)
-                                                        aciklamaTemiz
-                                                    ].join(' - ');
-                                                    return kalemRenk(
-                                                        label.isEmpty
-                                                            ? 'Transfer'
-                                                            : label,
-                                                        '- ${_formatTL(_parseDouble((t['tutarCtrl'] as TextEditingController).text))}',
-                                                        Colors.red[700]!);
-                                                  }),
-                                                  const SizedBox(height: 4),
-                                                ],
-                                                if (gelenler.isNotEmpty) ...[
-                                                  const Text('GELEN',
-                                                      style: TextStyle(
-                                                          color:
-                                                              Color(0xFF0288D1),
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontSize: 12)),
-                                                  ...gelenler.map((t) {
-                                                    final kaynakAd = (t['kaynakSubeAd']
-                                                                    as String?)
-                                                                ?.isNotEmpty ==
-                                                            true
-                                                        ? t['kaynakSubeAd']
-                                                            as String
-                                                        : (_subeAdlari[t[
-                                                                'kaynakSube']] ??
-                                                            t['kaynakSube']
-                                                                as String? ??
-                                                            '');
-                                                    final aciklama =
-                                                        t['aciklama']
-                                                                as String? ??
-                                                            '';
-                                                    final aciklamaTemiz =
-                                                        aciklama == kaynakAd ||
-                                                                aciklama ==
-                                                                    (t['kaynakSube'] ??
-                                                                        '')
-                                                            ? ''
-                                                            : aciklama;
-                                                    final label = [
-                                                      if (kaynakAd.isNotEmpty)
-                                                        kaynakAd,
-                                                      if (aciklamaTemiz
-                                                          .isNotEmpty)
-                                                        aciklamaTemiz
-                                                    ].join(' - ');
-                                                    return kalemRenk(
-                                                        label.isEmpty
-                                                            ? 'Transfer'
-                                                            : label,
-                                                        '+ ${_formatTL(_parseDouble((t['tutarCtrl'] as TextEditingController).text))}',
-                                                        const Color(
-                                                            0xFF0288D1));
-                                                  }),
-                                                  const SizedBox(height: 4),
-                                                ],
-                                                if (toplamGiden > 0 ||
-                                                    toplamGelen > 0) ...[
-                                                  const Divider(),
-                                                  if (toplamGiden > 0)
-                                                    kalemRenk(
-                                                        'Toplam Giden',
-                                                        '- ${_formatTL(toplamGiden)}',
-                                                        Colors.red[700]!),
-                                                  if (toplamGelen > 0)
-                                                    kalemRenk(
-                                                        'Toplam Gelen',
-                                                        '+ ${_formatTL(toplamGelen)}',
-                                                        const Color(
-                                                            0xFF0288D1)),
-                                                  if (toplamGiden > 0 &&
-                                                      toplamGelen > 0)
-                                                    Padding(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                          vertical: 2),
-                                                      child: Row(
-                                                          mainAxisAlignment:
-                                                              MainAxisAlignment
-                                                                  .spaceBetween,
-                                                          children: [
-                                                            Text('Net Transfer',
-                                                                style: TextStyle(
-                                                                    fontSize:
-                                                                        12,
-                                                                    color: netTransfer >=
-                                                                            0
-                                                                        ? const Color(
-                                                                            0xFF0288D1)
-                                                                        : Colors.red[
-                                                                            700],
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold)),
-                                                            Text(
-                                                                '${netTransfer >= 0 ? '+' : '-'} ${_formatTL(netTransfer.abs())}',
-                                                                style: TextStyle(
-                                                                    fontSize:
-                                                                        12,
-                                                                    color: netTransfer >=
-                                                                            0
-                                                                        ? const Color(
-                                                                            0xFF0288D1)
-                                                                        : Colors.red[
-                                                                            700],
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold)),
-                                                          ]),
-                                                    ),
-                                                ],
-                                              ]),
-                                        ),
-                                      ]),
-                                    );
-                                  }),
-                                  const SizedBox(height: 12),
-                                  // ── Diğer Alımlar (varsa) ──
-                                  Builder(builder: (context) {
-                                    final digerListesi =
-                                        _digerAlimlar.where((da) {
-                                      final aciklama = ((da['aciklamaCtrl']
-                                                      as TextEditingController?)
-                                                  ?.text ??
-                                              (da['aciklama'] ?? ''))
-                                          .toString()
-                                          .trim();
-                                      final tutar = _parseDouble(
-                                          (da['tutarCtrl']
-                                                      as TextEditingController?)
-                                                  ?.text ??
-                                              '0');
-                                      return aciklama.isNotEmpty || tutar > 0;
-                                    }).toList();
-                                    if (digerListesi.isEmpty)
-                                      return const SizedBox.shrink();
-                                    final toplam = digerListesi.fold(
-                                        0.0,
-                                        (s, da) =>
-                                            s +
-                                            _parseDouble((da['tutarCtrl']
-                                                        as TextEditingController?)
-                                                    ?.text ??
-                                                '0'));
-                                    return Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(14),
-                                        boxShadow: [
-                                          BoxShadow(
-                                              color:
-                                                  Colors.grey.withOpacity(0.1),
-                                              blurRadius: 8,
-                                              offset: const Offset(0, 2))
-                                        ],
-                                      ),
-                                      child: Column(children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16, vertical: 10),
-                                          decoration: BoxDecoration(
-                                            color: Colors.grey[700],
-                                            borderRadius:
-                                                const BorderRadius.only(
-                                                    topLeft:
-                                                        Radius.circular(14),
-                                                    topRight:
-                                                        Radius.circular(14)),
-                                          ),
-                                          child: Row(children: [
-                                            const Icon(
-                                                Icons.shopping_bag_outlined,
-                                                color: Colors.white,
-                                                size: 18),
-                                            const SizedBox(width: 8),
-                                            const Text('DİĞER ALIMLAR',
-                                                style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 13,
-                                                    letterSpacing: 1)),
-                                            const Spacer(),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 10,
-                                                      vertical: 4),
-                                              decoration: BoxDecoration(
-                                                  color: Colors.white
-                                                      .withOpacity(0.2),
-                                                  borderRadius:
-                                                      BorderRadius.circular(
-                                                          20)),
-                                              child: Text(_formatTL(toplam),
-                                                  style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontSize: 16)),
-                                            ),
-                                          ]),
-                                        ),
-                                        Padding(
-                                          padding: const EdgeInsets.all(14),
-                                          child: Column(
-                                              children: digerListesi.map((da) {
-                                            final aciklama = ((da[
-                                                                'aciklamaCtrl']
-                                                            as TextEditingController?)
-                                                        ?.text ??
-                                                    (da['aciklama'] ?? ''))
-                                                .toString()
-                                                .trim();
-                                            final tutar = _parseDouble((da[
-                                                            'tutarCtrl']
-                                                        as TextEditingController?)
-                                                    ?.text ??
-                                                '0');
-                                            if (tutar == 0)
-                                              return const SizedBox.shrink();
-                                            return Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 2),
-                                              child: Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment
-                                                          .spaceBetween,
-                                                  children: [
-                                                    Text(aciklama,
-                                                        style: const TextStyle(
-                                                            fontSize: 12)),
-                                                    Text(_formatTL(tutar),
-                                                        style: const TextStyle(
-                                                            fontSize: 12,
-                                                            fontWeight:
-                                                                FontWeight
-                                                                    .bold)),
-                                                  ]),
-                                            );
-                                          }).toList()),
-                                        ),
-                                      ]),
-                                    );
-                                  }),
-                                  const SizedBox(height: 24),
-                                  if (_dovizLimitiAsildi)
-                                    Container(
-                                      margin: const EdgeInsets.only(bottom: 12),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 10,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red[50],
-                                        borderRadius: BorderRadius.circular(8),
-                                        border:
-                                            Border.all(color: Colors.red[300]!),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.error_outline,
-                                            color: Colors.red[700],
-                                            size: 20,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              'Bankaya yatırılan döviz miktarı kasadakinden fazla! Lütfen düzeltin.',
-                                              style: TextStyle(
-                                                color: Colors.red[700],
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  // İnternet yok uyarısı
-                                  // Ana Kasa limit uyarısı
-                                  if (_anaKasaLimitiAsildi)
-                                    Container(
-                                      margin: const EdgeInsets.only(bottom: 12),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 10,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.deepOrange[50],
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: Colors.deepOrange[300]!,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.account_balance_wallet,
-                                            color: Colors.deepOrange[700],
-                                            size: 20,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              'Ana Kasa eksi kalıyor (${_formatTL(_anaKasaKalani)})! Yapılan işlemler Ana Kasayı aşıyor.',
-                                              style: TextStyle(
-                                                color: Colors.deepOrange[800],
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  if (!_internetVar)
-                                    Container(
-                                      margin: const EdgeInsets.only(bottom: 12),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 10,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.orange[50],
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: Colors.orange[400]!,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.wifi_off,
-                                            color: Colors.orange[800],
-                                            size: 20,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              'İnternet bağlantısı yok. Kayıt yapılamaz.',
-                                              style: TextStyle(
-                                                color: Colors.orange[900],
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  const SizedBox(height: 32),
-                                ],
-                              ),
-                            ),
+                            _ozetKapatSekmesi(),
                           ], // TabBarView children kapanış
                         ), // TabBarView kapanış
                       ), // Expanded kapanış

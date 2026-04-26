@@ -30,12 +30,16 @@ class GiderAdiAlaniState extends State<GiderAdiAlani> {
     if (widget.readOnly || widget.secenekler.isEmpty) return;
     final ctrl = TextEditingController(text: widget.ctrl.text);
 
+    // FIX: Navigator.pop ÖNCE, onChanged SONRA (addPostFrameCallback ile)
+    // Eski sıra: onChanged → setState → rebuild → bottom sheet açık → bordo ekran
     void kaydetVeKapat(BuildContext ctx, String deger) {
       final temiz = deger.trim();
       widget.ctrl.text = temiz;
       widget.ctrl.selection = TextSelection.collapsed(offset: temiz.length);
-      widget.onChanged?.call();
-      Navigator.pop(ctx);
+      Navigator.pop(ctx); // ← Önce bottom sheet'i kapat
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onChanged?.call(); // ← Sonra callback — parent rebuild güvenli
+      });
     }
 
     showModalBottomSheet(
@@ -51,7 +55,6 @@ class GiderAdiAlaniState extends State<GiderAdiAlani> {
                   .where((t) => t.toLowerCase().contains(q))
                   .toList();
           return GestureDetector(
-            // Boşluğa tıklayınca yazdığını kaydet ve kapat
             onTap: () => kaydetVeKapat(ctx, ctrl.text),
             behavior: HitTestBehavior.opaque,
             child: Container(
@@ -77,7 +80,7 @@ class GiderAdiAlaniState extends State<GiderAdiAlani> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                     child: GestureDetector(
-                      onTap: () {}, // iç tapa engel — dışarı bubble etmesin
+                      onTap: () {},
                       child: TextField(
                         controller: ctrl,
                         autofocus: true,
@@ -93,7 +96,6 @@ class GiderAdiAlaniState extends State<GiderAdiAlani> {
                         textCapitalization: TextCapitalization.words,
                         inputFormatters: [IlkHarfBuyukFormatter()],
                         onChanged: (_) => setS(() {}),
-                        // Enter'a basınca yazdığını kaydet
                         onSubmitted: (v) => kaydetVeKapat(ctx, v),
                       ),
                     ),
@@ -107,7 +109,6 @@ class GiderAdiAlaniState extends State<GiderAdiAlani> {
                       itemCount: filtreli.length + 1,
                       itemBuilder: (_, i) {
                         if (i == filtreli.length) {
-                          // Serbest metin ile devam et
                           if (ctrl.text.trim().isEmpty)
                             return const SizedBox.shrink();
                           final serbest = ctrl.text.trim();
@@ -184,8 +185,7 @@ class GiderAdiAlaniState extends State<GiderAdiAlani> {
   }
 }
 
-// DigerAlimAciklamaAlani artık GiderAdiAlaninin ince sarmalayıcısı —
-// onChanged callbacki ve labelText farkı dışında aynı widget.
+// DigerAlimAciklamaAlani — GiderAdiAlani'nin ince sarmalayıcısı
 class DigerAlimAciklamaAlani extends StatelessWidget {
   final TextEditingController ctrl;
   final List<String> secenekler;
@@ -207,5 +207,3 @@ class DigerAlimAciklamaAlani extends StatelessWidget {
     );
   }
 }
-
-// ─── Ödeme Yöntemleri Kartı ─────────────────────────────────────────────────────
