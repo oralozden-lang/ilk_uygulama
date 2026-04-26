@@ -27,13 +27,13 @@ class _RaporlarTabState extends State<RaporlarTab> {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<String>>(
-      future: _subelerGelecek, // sabit referans — rebuild'de tekrar çağrılmaz
+      future: _subelerGelecek,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting)
           return const Center(child: CircularProgressIndicator());
         final subeler = snap.data ?? [];
         return DefaultTabController(
-          length: 2,
+          length: 3,
           child: Column(
             children: [
               Container(
@@ -47,6 +47,9 @@ class _RaporlarTabState extends State<RaporlarTab> {
                         icon: Icon(Icons.bar_chart, size: 18),
                         text: 'Dönem Raporu'),
                     Tab(icon: Icon(Icons.store, size: 18), text: 'Şube Özet'),
+                    Tab(
+                        icon: Icon(Icons.payment, size: 18),
+                        text: 'Ödeme Kanalları'),
                   ],
                 ),
               ),
@@ -58,6 +61,7 @@ class _RaporlarTabState extends State<RaporlarTab> {
                       merkziGiderGor: widget.merkziGiderGor,
                     ),
                     SubeOzetTablosu(subeler: subeler),
+                    OdemeKanallariWidget(subeler: subeler),
                   ],
                 ),
               ),

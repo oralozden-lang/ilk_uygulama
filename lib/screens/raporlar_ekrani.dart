@@ -1652,18 +1652,35 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
   @override
   bool get wantKeepAlive => true;
 
+  String _filtreModu = 'ay';
   int _secilenYil = DateTime.now().year;
   int _secilenAy = DateTime.now().month;
+  DateTime _baslangic = DateTime(DateTime.now().year, DateTime.now().month, 1);
+  DateTime _bitis = DateTime.now();
   String? _secilenSube;
-  bool _yukleniyor = false;
+  bool _karsilastirmaAcik = false;
+  int _karsilastirmaYil = DateTime.now().year;
+  int _karsilastirmaAy =
+      DateTime.now().month == 1 ? 12 : DateTime.now().month - 1;
+  DateTime _karsilastirmaBaslangic = DateTime(
+    DateTime.now().month == 1 ? DateTime.now().year - 1 : DateTime.now().year,
+    DateTime.now().month == 1 ? 12 : DateTime.now().month - 1,
+    1,
+  );
+  DateTime _karsilastirmaBitis = DateTime(
+    DateTime.now().month == 1 ? DateTime.now().year - 1 : DateTime.now().year,
+    DateTime.now().month == 1 ? 12 : DateTime.now().month,
+    0,
+  );
+  bool _siralamaArtan = false;
+  String? _secilenKanalDocId;
 
+  bool _yukleniyor = false;
   Map<String, String> _subeAdlari = {};
-  // Kanallar: Firestore'dan sabit liste
-  List<Map<String, dynamic>> _kanallar = []; // {key, ad, tip: 'yemek'|'online'}
-  // Veri: tarih → {kanalKey → tutar}
-  Map<String, Map<String, double>> _gunVerileri = {};
-  // Tarihler sıralı
-  List<String> _tarihler = [];
+  List<Map<String, dynamic>> _kanallar = [];
+  List<Map<String, dynamic>> _kayitlar = [];
+  List<Map<String, dynamic>> _karsilastirmaKayitlar = [];
+  Map<String, String> _subeGunMap = {};
 
   final List<String> _aylar = [
     'Ocak',
@@ -1691,221 +1708,698 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
     try {
       final snap = await FirebaseFirestore.instance.collection('subeler').get();
       if (!mounted) return;
-      setState(() {
-        _subeAdlari = {
-          for (var d in snap.docs) d.id: (d.data()['ad'] as String?) ?? d.id
-        };
-      });
+      setState(() => _subeAdlari = {
+            for (var d in snap.docs) d.id: (d.data()['ad'] as String?) ?? d.id
+          });
     } catch (_) {}
   }
 
   Future<void> _kanallarYukle() async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('odemeyontemleri')
-          .orderBy('sira')
-          .get();
+      final snap =
+          await FirebaseFirestore.instance.collection('odemeyontemleri').get();
       if (!mounted) return;
       final liste = <Map<String, dynamic>>[];
       for (final doc in snap.docs) {
         final tip = (doc.data()['tip'] as String?) ?? '';
-        if (tip == 'yemek' || tip == 'online') {
+        final aktif = (doc.data()['aktif'] as bool?) ?? true;
+        if ((tip == 'yemekKarti' || tip == 'online') && aktif) {
+          final sira = (doc.data()['sira'] as num?)?.toInt() ??
+              (doc.data()['pulseSira'] as num?)?.toInt() ??
+              99;
           liste.add({
-            'key': doc.id,
+            'docId': doc.id,
             'ad': (doc.data()['ad'] as String?) ?? doc.id,
             'tip': tip,
+            'sira': sira,
           });
         }
       }
-      setState(() => _kanallar = liste);
+      liste.sort((a, b) => (a['sira'] as int).compareTo(b['sira'] as int));
+      if (mounted) {
+        setState(() {
+          _kanallar = liste;
+          // _secilenKanalDocId null kalır = Tüm Yöntemler
+        });
+      }
     } catch (_) {}
   }
 
   List<String> get _aktifSubeler =>
       widget.subeler.isNotEmpty ? widget.subeler : _subeAdlari.keys.toList();
 
+  String _pad2(int n) => n.toString().padLeft(2, '0');
+
+  String _baslangicKey() {
+    if (_filtreModu == 'ay') {
+      return '${_secilenYil.toString().padLeft(4, '0')}-${_pad2(_secilenAy)}-01';
+    }
+    return '${_baslangic.year.toString().padLeft(4, '0')}-${_pad2(_baslangic.month)}-${_pad2(_baslangic.day)}';
+  }
+
+  String _bitisKey() {
+    if (_filtreModu == 'ay') {
+      final sonGun = DateTime(_secilenYil, _secilenAy + 1, 0).day;
+      return '${_secilenYil.toString().padLeft(4, '0')}-${_pad2(_secilenAy)}-${_pad2(sonGun)}';
+    }
+    return '${_bitis.year.toString().padLeft(4, '0')}-${_pad2(_bitis.month)}-${_pad2(_bitis.day)}';
+  }
+
+  String _karsilastirmaBas() {
+    if (_filtreModu == 'ay') {
+      return '${_karsilastirmaYil.toString().padLeft(4, '0')}-${_pad2(_karsilastirmaAy)}-01';
+    }
+    return '${_karsilastirmaBaslangic.year.toString().padLeft(4, '0')}-${_pad2(_karsilastirmaBaslangic.month)}-${_pad2(_karsilastirmaBaslangic.day)}';
+  }
+
+  String _karsilastirmaBit() {
+    if (_filtreModu == 'ay') {
+      final sonGun = DateTime(_karsilastirmaYil, _karsilastirmaAy + 1, 0).day;
+      return '${_karsilastirmaYil.toString().padLeft(4, '0')}-${_pad2(_karsilastirmaAy)}-${_pad2(sonGun)}';
+    }
+    return '${_karsilastirmaBitis.year.toString().padLeft(4, '0')}-${_pad2(_karsilastirmaBitis.month)}-${_pad2(_karsilastirmaBitis.day)}';
+  }
+
+  String _fmtTarih(DateTime dt) =>
+      '${_pad2(dt.day)}.${_pad2(dt.month)}.${dt.year}';
+
+  Future<List<Map<String, dynamic>>> _veriCek(String bas, String bit) async {
+    final hedefSubeler = _secilenSube != null ? [_secilenSube!] : _aktifSubeler;
+    final futures = hedefSubeler.map((sube) async {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('subeler')
+            .doc(sube)
+            .collection('gunluk')
+            .where('tarih', isGreaterThanOrEqualTo: bas)
+            .where('tarih', isLessThanOrEqualTo: bit)
+            .orderBy('tarih')
+            .get();
+        return snap.docs.map((d) => {...d.data(), '_subeId': sube}).toList();
+      } catch (_) {
+        return <Map<String, dynamic>>[];
+      }
+    });
+    final results = await Future.wait(futures);
+    final sonuc = <Map<String, dynamic>>[];
+    for (final liste in results) sonuc.addAll(liste);
+    sonuc
+        .sort((a, b) => (a['tarih'] as String).compareTo(b['tarih'] as String));
+    for (final k in sonuc) {
+      _subeGunMap[k['tarih'] as String] = k['_subeId'] as String;
+    }
+    return sonuc;
+  }
+
   Future<void> _yukle() async {
     if (!mounted) return;
+    if (_kanallar.isEmpty) await _kanallarYukle();
+    if (_kanallar.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Ödeme kanalları bulunamadı.'),
+          backgroundColor: Colors.orange,
+        ));
+      }
+      return;
+    }
     setState(() {
       _yukleniyor = true;
-      _gunVerileri = {};
-      _tarihler = [];
+      _kayitlar = [];
+      _karsilastirmaKayitlar = [];
     });
-
     try {
-      final bas =
-          '${_secilenYil.toString().padLeft(4, '0')}-${_secilenAy.toString().padLeft(2, '0')}-01';
-      final sonGun = DateTime(_secilenYil, _secilenAy + 1, 0).day;
-      final bit =
-          '${_secilenYil.toString().padLeft(4, '0')}-${_secilenAy.toString().padLeft(2, '0')}-${sonGun.toString().padLeft(2, '0')}';
-
-      final hedefSubeler =
-          _secilenSube != null ? [_secilenSube!] : _aktifSubeler;
-
-      final futures = hedefSubeler.map((sube) async {
-        try {
-          final snap = await FirebaseFirestore.instance
-              .collection('subeler')
-              .doc(sube)
-              .collection('gunluk')
-              .where('tarih', isGreaterThanOrEqualTo: bas)
-              .where('tarih', isLessThanOrEqualTo: bit)
-              .orderBy('tarih')
-              .get();
-          return snap.docs.map((d) => {...d.data(), '_subeId': sube}).toList();
-        } catch (_) {
-          return <Map<String, dynamic>>[];
-        }
-      });
-
+      final futures = <Future>[
+        _veriCek(_baslangicKey(), _bitisKey()),
+        if (_karsilastirmaAcik)
+          _veriCek(_karsilastirmaBas(), _karsilastirmaBit())
+        else
+          Future.value(<Map<String, dynamic>>[]),
+      ];
       final results = await Future.wait(futures);
-      final tumKayitlar = <Map<String, dynamic>>[];
-      for (final liste in results) tumKayitlar.addAll(liste);
-      tumKayitlar.sort(
-          (a, b) => (a['tarih'] as String).compareTo(b['tarih'] as String));
-
-      // Gün bazlı veri oluştur
-      final gunVerileri = <String, Map<String, double>>{};
-      final subeGunMap =
-          <String, String>{}; // tarih → subeId (tek şube modunda)
-
-      for (final k in tumKayitlar) {
-        final tarih = k['tarih'] as String;
-        final subeId = k['_subeId'] as String;
-        final pulse = (k['pulseKiyasVerileri'] as Map?) ?? {};
-
-        gunVerileri[tarih] ??= {'_subeId': 0}; // subeId ayrı sakla
-        subeGunMap[tarih] = subeId;
-
-        for (final kanal in _kanallar) {
-          final key = kanal['key'] as String;
-          final tip = kanal['tip'] as String;
-
-          double tutar = 0;
-          if (tip == 'yemek') {
-            tutar = (pulse['yemek_$key'] as num? ?? 0).toDouble();
-          } else {
-            tutar = (pulse[key] as num? ?? 0).toDouble();
-          }
-          gunVerileri[tarih]![key] = (gunVerileri[tarih]![key] ?? 0) + tutar;
-        }
-      }
-
-      // subeId'yi ayrı map'te tut
       if (!mounted) return;
       setState(() {
-        _gunVerileri = gunVerileri;
-        _tarihler = gunVerileri.keys.toList()..sort();
+        _kayitlar = results[0] as List<Map<String, dynamic>>;
+        _karsilastirmaKayitlar =
+            _karsilastirmaAcik ? results[1] as List<Map<String, dynamic>> : [];
         _yukleniyor = false;
-        // subeGunMap'i sakla
-        _subeGunMap = subeGunMap;
       });
     } catch (e) {
       if (mounted) setState(() => _yukleniyor = false);
     }
   }
 
-  Map<String, String> _subeGunMap = {};
+  double _parseFirestore(dynamic raw) {
+    if (raw == null) return 0.0;
+    if (raw is double) return raw;
+    if (raw is int) return raw.toDouble();
+    final s = raw.toString().trim();
+    final temiz = s.replaceAll('.', '').replaceAll(',', '.');
+    return double.tryParse(temiz) ?? 0.0;
+  }
+
+  double _kanalTutarTek(
+      Map<String, dynamic> kayit, Map<String, dynamic> kanal) {
+    final docId = kanal['docId'] as String;
+    final tip = kanal['tip'] as String;
+    final pulse = (kayit['pulseKiyasVerileri'] as Map?) ?? {};
+    final pulseKey = tip == 'yemekKarti' ? 'yemek_$docId' : 'online_$docId';
+    var raw = pulse[pulseKey];
+    if (raw == null) {
+      final ad = kanal['ad'] as String;
+      final eskiKey = tip == 'yemekKarti' ? 'yemek_$ad' : ad;
+      raw = pulse[eskiKey];
+    }
+    return _parseFirestore(raw);
+  }
+
+  double _kanalTutar(Map<String, dynamic> kayit, String? docId) {
+    if (docId == null) {
+      return _kanallar.fold(0.0, (s, k) => s + _kanalTutarTek(kayit, k));
+    }
+    final kanal =
+        _kanallar.firstWhere((k) => k['docId'] == docId, orElse: () => {});
+    if (kanal.isEmpty) return 0.0;
+    return _kanalTutarTek(kayit, kanal);
+  }
 
   String _fmt(double v) {
-    if (v <= 0) return '—';
     final parts = v.toStringAsFixed(2).split('.');
     final buf = StringBuffer();
     for (int i = 0; i < parts[0].length; i++) {
       if (i > 0 && (parts[0].length - i) % 3 == 0) buf.write('.');
       buf.write(parts[0][i]);
     }
-    return '${buf.toString()},${parts[1]}';
+    return '${buf.toString()},${parts[1]} ₺';
+  }
+
+  Widget _satirOzet(String label, double deger, Color renk) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child:
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Flexible(
+              child: Text(label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: renk, fontSize: 13))),
+          const SizedBox(width: 8),
+          Text(_fmt(deger),
+              style: TextStyle(
+                  fontWeight: FontWeight.w600, color: renk, fontSize: 13)),
+        ]),
+      );
+
+  Widget _ozetKart(
+    List<Map<String, dynamic>> kayitlar,
+    String baslik,
+    Color renk,
+    String? docId,
+  ) {
+    if (kayitlar.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+              color: renk.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
+      ),
+      child: Column(children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: renk,
+            borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(14), topRight: Radius.circular(14)),
+          ),
+          child:
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(baslik,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14)),
+            Text('${kayitlar.length} gün',
+                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(children: [
+            if (docId == null) ...[
+              // Tüm yöntemler — her kanal ayrı satır
+              ..._kanallar.map((kanal) {
+                final toplam =
+                    kayitlar.fold(0.0, (s, k) => s + _kanalTutarTek(k, kanal));
+                if (toplam <= 0) return const SizedBox.shrink();
+                final isYemek = kanal['tip'] == 'yemekKarti';
+                return _satirOzet(
+                  kanal['ad'] as String,
+                  toplam,
+                  isYemek ? const Color(0xFF2E7D32) : const Color(0xFF1565C0),
+                );
+              }),
+              const Divider(),
+              _satirOzet('Toplam',
+                  kayitlar.fold(0.0, (s, k) => s + _kanalTutar(k, null)), renk),
+            ] else ...[
+              // Tek kanal
+              _satirOzet(
+                _kanallar.firstWhere((k) => k['docId'] == docId,
+                    orElse: () => {'ad': 'Toplam'})['ad'] as String,
+                kayitlar.fold(0.0, (s, k) => s + _kanalTutar(k, docId)),
+                renk,
+              ),
+            ],
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _detayTablo(List<Map<String, dynamic>> kayitlar, String? docId) {
+    if (kayitlar.isEmpty) return const SizedBox.shrink();
+    final sirali = _siralamaArtan ? kayitlar : kayitlar.reversed.toList();
+
+    // Gösterilecek kanallar
+    final gorunenKanallar = docId == null
+        ? _kanallar
+        : _kanallar.where((k) => k['docId'] == docId).toList();
+
+    // Tek kanal → basit liste, çok kanal → yatay kaydırmalı tablo
+    if (gorunenKanallar.length == 1) {
+      // Tek kanal — basit liste
+      final kanal = gorunenKanallar.first;
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2))
+            ],
+          ),
+          child: Column(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              color: const Color(0xFF0288D1),
+              child: const Row(children: [
+                Expanded(
+                    child: Text('Tarih',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12))),
+                Text('Tutar',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12)),
+              ]),
+            ),
+            ...sirali.asMap().entries.map((e) {
+              final idx = e.key;
+              final k = e.value;
+              final tarihRaw = k['tarih'] as String? ?? '';
+              final tarihGoster = k['tarihGoster'] as String? ?? tarihRaw;
+              final subeId = k['_subeId'] as String? ?? '';
+              final subeAd = _subeAdlari[subeId] ?? '';
+              final tutar = _kanalTutarTek(k, kanal);
+              return GestureDetector(
+                onTap: () {
+                  final parts = tarihRaw.split('-');
+                  if (parts.length != 3) return;
+                  final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]),
+                      int.parse(parts[2]));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => OnHazirlikEkrani(
+                              subeKodu: subeId,
+                              subeler: widget.subeler,
+                              baslangicTarihi: dt,
+                              gecmisGunHakki: -1,
+                              initialTabIndex: 0)));
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  color: idx % 2 == 0 ? Colors.grey[50] : Colors.white,
+                  child: Row(children: [
+                    Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Row(children: [
+                            Text(tarihGoster,
+                                style: const TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.w500)),
+                            Icon(Icons.chevron_right,
+                                size: 14, color: Colors.grey[400]),
+                          ]),
+                          if (_aktifSubeler.length > 1 && subeAd.isNotEmpty)
+                            Text(subeAd,
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.grey[500])),
+                        ])),
+                    Text(tutar > 0 ? _fmt(tutar) : '—',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: tutar > 0
+                                ? const Color(0xFF0288D1)
+                                : Colors.grey[400])),
+                  ]),
+                ),
+              );
+            }),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              color: const Color(0xFF0288D1),
+              child: Row(children: [
+                const Expanded(
+                    child: Text('TOPLAM',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12))),
+                Text(
+                    _fmt(kayitlar.fold(
+                        0.0, (s, k) => s + _kanalTutarTek(k, kanal))),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13)),
+              ]),
+            ),
+          ]),
+        ),
+      );
+    }
+
+    // Çok kanal — yatay kaydırmalı tablo
+    const double tarihW = 90.0;
+    const double colW = 90.0;
+    const double rowH = 38.0;
+    const double baslikH = 44.0;
+
+    // Dönem toplamları
+    final toplamlar = {
+      for (final k in gorunenKanallar)
+        k['docId'] as String:
+            kayitlar.fold(0.0, (s, r) => s + _kanalTutarTek(r, k))
+    };
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2))
+          ],
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Sol: sabit tarih sütunu
+          SizedBox(
+            width: tarihW,
+            child: Column(children: [
+              Container(
+                height: baslikH,
+                color: const Color(0xFF0288D1),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                alignment: Alignment.centerLeft,
+                child: const Text('Tarih',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12)),
+              ),
+              ...sirali.asMap().entries.map((e) {
+                final idx = e.key;
+                final k = e.value;
+                final tarihRaw = k['tarih'] as String? ?? '';
+                final tarihGoster = k['tarihGoster'] as String? ?? tarihRaw;
+                final subeId = k['_subeId'] as String? ?? '';
+                final subeAd = _subeAdlari[subeId] ?? '';
+                return GestureDetector(
+                  onTap: () {
+                    final parts = tarihRaw.split('-');
+                    if (parts.length != 3) return;
+                    final dt = DateTime(int.parse(parts[0]),
+                        int.parse(parts[1]), int.parse(parts[2]));
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => OnHazirlikEkrani(
+                                subeKodu: subeId,
+                                subeler: widget.subeler,
+                                baslangicTarihi: dt,
+                                gecmisGunHakki: -1,
+                                initialTabIndex: 0)));
+                  },
+                  child: Container(
+                    height: rowH,
+                    color: idx % 2 == 0 ? Colors.grey[50] : Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Expanded(
+                                child: Text(tarihGoster,
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500),
+                                    overflow: TextOverflow.ellipsis)),
+                            Icon(Icons.chevron_right,
+                                size: 12, color: Colors.grey[400]),
+                          ]),
+                          if (_aktifSubeler.length > 1 && subeAd.isNotEmpty)
+                            Text(subeAd,
+                                style: TextStyle(
+                                    fontSize: 9, color: Colors.grey[500])),
+                        ]),
+                  ),
+                );
+              }),
+              Container(
+                height: rowH,
+                color: const Color(0xFF0288D1),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                alignment: Alignment.centerLeft,
+                child: const Text('TOPLAM',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10)),
+              ),
+            ]),
+          ),
+          // Sağ: yatay kaydırmalı kanallar
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Başlıklar
+                    Container(
+                      height: baslikH,
+                      color: const Color(0xFF0288D1),
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Row(
+                          children: gorunenKanallar
+                              .map((k) => Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: SizedBox(
+                                        width: colW,
+                                        child: Text(k['ad'] as String,
+                                            style: TextStyle(
+                                                color: k['tip'] == 'yemekKarti'
+                                                    ? const Color(0xFFA5D6A7)
+                                                    : const Color(0xFF90CAF9),
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 11),
+                                            textAlign: TextAlign.right,
+                                            overflow: TextOverflow.ellipsis)),
+                                  ))
+                              .toList()),
+                    ),
+                    // Gün satırları
+                    ...sirali.asMap().entries.map((e) {
+                      final idx = e.key;
+                      final k = e.value;
+                      return Container(
+                        height: rowH,
+                        color: idx % 2 == 0 ? Colors.grey[50] : Colors.white,
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: gorunenKanallar.map((kanal) {
+                              final val = _kanalTutarTek(k, kanal);
+                              final isYemek = kanal['tip'] == 'yemekKarti';
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: SizedBox(
+                                    width: colW,
+                                    child: Text(val > 0 ? _fmt(val) : '—',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: val > 0
+                                                ? (isYemek
+                                                    ? const Color(0xFF2E7D32)
+                                                    : const Color(0xFF1565C0))
+                                                : Colors.grey[400],
+                                            fontWeight: val > 0
+                                                ? FontWeight.w600
+                                                : FontWeight.normal),
+                                        textAlign: TextAlign.right,
+                                        overflow: TextOverflow.ellipsis)),
+                              );
+                            }).toList()),
+                      );
+                    }),
+                    // Toplam satırı
+                    Container(
+                      height: rowH,
+                      color: const Color(0xFF0288D1),
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: gorunenKanallar.map((k) {
+                            final t = toplamlar[k['docId']] ?? 0.0;
+                            return Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: SizedBox(
+                                    width: colW,
+                                    child: Text(t > 0 ? _fmt(t) : '—',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: t > 0
+                                                ? Colors.white
+                                                : Colors.white38),
+                                        textAlign: TextAlign.right)));
+                          }).toList()),
+                    ),
+                  ]),
+            ),
+          ),
+        ]),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-
-    // Kanal grupları
-    final yemekKanallar = _kanallar.where((k) => k['tip'] == 'yemek').toList();
-    final onlineKanallar =
-        _kanallar.where((k) => k['tip'] == 'online').toList();
-
-    // Dönem toplamları
-    final Map<String, double> kanalToplamlari = {};
-    for (final tarih in _tarihler) {
-      final gun = _gunVerileri[tarih] ?? {};
-      for (final kanal in _kanallar) {
-        final key = kanal['key'] as String;
-        kanalToplamlari[key] = (kanalToplamlari[key] ?? 0) + (gun[key] ?? 0);
-      }
-    }
-
-    const double colW = 90.0;
-    const double tarihW = 72.0;
-    const double rowH = 36.0;
-    const double baslikH = 44.0;
-    const double grupBaslikH = 28.0;
-
-    Widget colBaslik(String label, {Color? renk}) => SizedBox(
-          width: colW,
-          child: Text(label,
-              style: TextStyle(
-                  color: renk ?? Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11),
-              textAlign: TextAlign.right,
-              overflow: TextOverflow.ellipsis),
-        );
-
-    Widget hucre(String deger, {Color? renk, bool bold = false}) => SizedBox(
-          width: colW,
-          child: Text(deger,
-              style: TextStyle(
-                  fontSize: 11,
-                  color: deger == '—'
-                      ? Colors.grey[400]
-                      : (renk ?? Colors.black87),
-                  fontWeight: bold ? FontWeight.bold : FontWeight.normal),
-              textAlign: TextAlign.right,
-              overflow: TextOverflow.ellipsis),
-        );
+    final docId = _secilenKanalDocId;
+    final baslikAna = _filtreModu == 'ay'
+        ? '${_aylar[_secilenAy - 1]} $_secilenYil'
+        : 'Seçili Dönem';
+    final baslikKars = _filtreModu == 'ay'
+        ? '${_aylar[_karsilastirmaAy - 1]} $_karsilastirmaYil'
+        : '${_pad2(_karsilastirmaBaslangic.day)}.${_pad2(_karsilastirmaBaslangic.month)} – ${_fmtTarih(_karsilastirmaBitis)}';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Filtre kartı
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Expanded(
-                    child: DropdownButtonFormField<int>(
-                  value: _secilenAy,
-                  decoration: const InputDecoration(
-                      labelText: 'Ay',
-                      border: OutlineInputBorder(),
-                      isDense: true),
-                  items: List.generate(
-                      12,
-                      (i) => DropdownMenuItem(
-                          value: i + 1, child: Text(_aylar[i]))),
-                  onChanged: (v) => setState(() => _secilenAy = v!),
-                )),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: DropdownButtonFormField<int>(
-                  value: _secilenYil,
-                  decoration: const InputDecoration(
-                      labelText: 'Yıl',
-                      border: OutlineInputBorder(),
-                      isDense: true),
-                  items: List.generate(5, (i) => DateTime.now().year - i)
-                      .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
-                      .toList(),
-                  onChanged: (v) => setState(() => _secilenYil = v!),
-                )),
-              ]),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                      value: 'ay',
+                      label: Text('Ay Seç'),
+                      icon: Icon(Icons.calendar_month)),
+                  ButtonSegment(
+                      value: 'aralik',
+                      label: Text('Tarih Aralığı'),
+                      icon: Icon(Icons.date_range)),
+                ],
+                selected: {_filtreModu},
+                onSelectionChanged: (s) =>
+                    setState(() => _filtreModu = s.first),
+              ),
+              const SizedBox(height: 12),
+              if (_filtreModu == 'ay') ...[
+                Row(children: [
+                  Expanded(
+                      child: DropdownButtonFormField<int>(
+                    value: _secilenAy,
+                    decoration: const InputDecoration(
+                        labelText: 'Ay', border: OutlineInputBorder()),
+                    items: List.generate(
+                        12,
+                        (i) => DropdownMenuItem(
+                            value: i + 1, child: Text(_aylar[i]))),
+                    onChanged: (v) => setState(() => _secilenAy = v!),
+                  )),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: DropdownButtonFormField<int>(
+                    value: _secilenYil,
+                    decoration: const InputDecoration(
+                        labelText: 'Yıl', border: OutlineInputBorder()),
+                    items: List.generate(5, (i) => DateTime.now().year - i)
+                        .map((y) => DropdownMenuItem(
+                            value: y, child: Text(y.toString())))
+                        .toList(),
+                    onChanged: (v) => setState(() => _secilenYil = v!),
+                  )),
+                ]),
+              ] else ...[
+                Row(children: [
+                  Expanded(
+                      child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final p = await showDatePicker(
+                          context: context,
+                          initialDate: _baslangic,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now());
+                      if (p != null) setState(() => _baslangic = p);
+                    },
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text(_fmtTarih(_baslangic)),
+                  )),
+                  const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Text('—')),
+                  Expanded(
+                      child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final p = await showDatePicker(
+                          context: context,
+                          initialDate: _bitis,
+                          firstDate: _baslangic,
+                          lastDate: DateTime.now());
+                      if (p != null) setState(() => _bitis = p);
+                    },
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text(_fmtTarih(_bitis)),
+                  )),
+                ]),
+              ],
               if (_aktifSubeler.length > 1) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
                   value: _secilenSube,
                   decoration: const InputDecoration(
@@ -1922,9 +2416,96 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
                 ),
               ],
               const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
+              DropdownButtonFormField<String?>(
+                value: _secilenKanalDocId,
+                decoration: const InputDecoration(
+                    labelText: 'Ödeme Yöntemi',
+                    border: OutlineInputBorder(),
+                    isDense: true),
+                items: [
+                  const DropdownMenuItem<String?>(
+                      value: null, child: Text('Tüm Yöntemler')),
+                  ..._kanallar.map((k) => DropdownMenuItem<String?>(
+                        value: k['docId'] as String,
+                        child: Text(k['ad'] as String),
+                      )),
+                ],
+                onChanged: (v) => setState(() => _secilenKanalDocId = v),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Önceki Dönemle Karşılaştır'),
+                value: _karsilastirmaAcik,
+                activeColor: const Color(0xFF0288D1),
+                onChanged: (v) => setState(() => _karsilastirmaAcik = v),
+              ),
+              if (_karsilastirmaAcik) ...[
+                if (_filtreModu == 'ay')
+                  Row(children: [
+                    Expanded(
+                        child: DropdownButtonFormField<int>(
+                      value: _karsilastirmaAy,
+                      decoration: const InputDecoration(
+                          labelText: 'Karş. Ay', border: OutlineInputBorder()),
+                      items: List.generate(
+                          12,
+                          (i) => DropdownMenuItem(
+                              value: i + 1, child: Text(_aylar[i]))),
+                      onChanged: (v) => setState(() => _karsilastirmaAy = v!),
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: DropdownButtonFormField<int>(
+                      value: _karsilastirmaYil,
+                      decoration: const InputDecoration(
+                          labelText: 'Karş. Yıl', border: OutlineInputBorder()),
+                      items: List.generate(5, (i) => DateTime.now().year - i)
+                          .map((y) => DropdownMenuItem(
+                              value: y, child: Text(y.toString())))
+                          .toList(),
+                      onChanged: (v) => setState(() => _karsilastirmaYil = v!),
+                    )),
+                  ])
+                else
+                  Row(children: [
+                    Expanded(
+                        child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final p = await showDatePicker(
+                            context: context,
+                            initialDate: _karsilastirmaBaslangic,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime.now());
+                        if (p != null)
+                          setState(() => _karsilastirmaBaslangic = p);
+                      },
+                      icon: const Icon(Icons.calendar_today, size: 16),
+                      label: Text(_fmtTarih(_karsilastirmaBaslangic)),
+                    )),
+                    const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('—')),
+                    Expanded(
+                        child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final p = await showDatePicker(
+                            context: context,
+                            initialDate: _karsilastirmaBitis,
+                            firstDate: _karsilastirmaBaslangic,
+                            lastDate: DateTime.now());
+                        if (p != null) setState(() => _karsilastirmaBitis = p);
+                      },
+                      icon: const Icon(Icons.calendar_today, size: 16),
+                      label: Text(_fmtTarih(_karsilastirmaBitis)),
+                    )),
+                  ]),
+              ],
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                    child: ElevatedButton.icon(
                   onPressed: _yukle,
                   icon: _yukleniyor
                       ? const SizedBox(
@@ -1937,239 +2518,66 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
                   style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0288D1),
                       foregroundColor: Colors.white),
+                )),
+                const SizedBox(width: 8),
+                Text(_siralamaArtan ? 'Eskiden Yeniye' : 'Yeniden Eskiye',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                IconButton(
+                  icon: Icon(
+                      _siralamaArtan
+                          ? Icons.arrow_upward
+                          : Icons.arrow_downward,
+                      size: 18,
+                      color: const Color(0xFF0288D1)),
+                  onPressed: () =>
+                      setState(() => _siralamaArtan = !_siralamaArtan),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
-              ),
+              ]),
             ]),
           ),
         ),
-
-        if (_kanallar.isEmpty && !_yukleniyor)
-          const Padding(
-            padding: EdgeInsets.all(32),
-            child: Center(
-                child: Text('Ödeme yöntemleri yüklenemedi.',
-                    style: TextStyle(color: Colors.grey))),
-          ),
-
-        if (_tarihler.isNotEmpty) ...[
+        if (_kayitlar.isNotEmpty) ...[
           const SizedBox(height: 16),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2))
-                ],
-              ),
-              child:
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // Sol: sabit tarih sütunu
-                Column(children: [
-                  Container(
-                    width: tarihW,
-                    height: baslikH + grupBaslikH,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF0288D1),
-                      borderRadius:
-                          BorderRadius.only(topLeft: Radius.circular(14)),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    alignment: Alignment.centerLeft,
-                    child: const Text('Tarih',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12)),
-                  ),
-                  ..._tarihler.asMap().entries.map((e) {
-                    final idx = e.key;
-                    final tarih = e.value;
-                    final subeId = _subeGunMap[tarih] ??
-                        (_secilenSube ??
-                            (_aktifSubeler.isNotEmpty
-                                ? _aktifSubeler.first
-                                : ''));
-                    final parcalar = tarih.split('-');
-                    final gorunen = parcalar.length == 3
-                        ? '${parcalar[2]}.${parcalar[1]}.${parcalar[0].substring(2)}'
-                        : tarih;
-                    return GestureDetector(
-                      onTap: () {
-                        if (parcalar.length != 3) return;
-                        final dt = DateTime(int.parse(parcalar[0]),
-                            int.parse(parcalar[1]), int.parse(parcalar[2]));
-                        Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => OnHazirlikEkrani(
-                                subeKodu: subeId,
-                                subeler: widget.subeler,
-                                baslangicTarihi: dt,
-                                gecmisGunHakki: -1,
-                                initialTabIndex: 0, // POS & Yemek Kartı sekmesi
-                              ),
-                            ));
-                      },
-                      child: Container(
-                        width: tarihW,
-                        height: rowH,
-                        color: idx % 2 == 0 ? Colors.grey[50] : Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Row(children: [
-                          Expanded(
-                              child: Text(gorunen,
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500))),
-                          Icon(Icons.chevron_right,
-                              size: 12, color: Colors.grey[400]),
-                        ]),
-                      ),
-                    );
-                  }),
-                  // Toplam satırı
-                  Container(
-                    width: tarihW,
-                    height: rowH,
-                    color: const Color(0xFF0288D1),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    alignment: Alignment.centerLeft,
-                    child: const Text('TOPLAM',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 10)),
-                  ),
-                ]),
-
-                // Sağ: yatay kaydırmalı kanal sütunları
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Grup başlıkları
-                          Row(children: [
-                            if (yemekKanallar.isNotEmpty)
-                              Container(
-                                width: colW * yemekKanallar.length +
-                                    8.0 * (yemekKanallar.length - 1) +
-                                    8,
-                                height: grupBaslikH,
-                                color: const Color(0xFF2E7D32),
-                                alignment: Alignment.center,
-                                child: const Text('YEMEK KARTLARI',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 10,
-                                        letterSpacing: 0.5)),
-                              ),
-                            if (onlineKanallar.isNotEmpty)
-                              Container(
-                                width: colW * onlineKanallar.length +
-                                    8.0 * (onlineKanallar.length - 1) +
-                                    8,
-                                height: grupBaslikH,
-                                color: const Color(0xFF1565C0),
-                                alignment: Alignment.center,
-                                child: const Text('ONLİNE ÖDEMELER',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 10,
-                                        letterSpacing: 0.5)),
-                              ),
-                          ]),
-
-                          // Kanal başlıkları
-                          Container(
-                            height: baslikH,
-                            color: const Color(0xFF0288D1),
-                            padding: const EdgeInsets.only(right: 8),
-                            child: Row(children: [
-                              ..._kanallar.map((k) => Padding(
-                                    padding: const EdgeInsets.only(left: 8),
-                                    child: colBaslik(k['ad'] as String,
-                                        renk: (k['tip'] == 'yemek')
-                                            ? const Color(0xFFA5D6A7)
-                                            : const Color(0xFF90CAF9)),
-                                  )),
-                            ]),
-                          ),
-
-                          // Gün satırları
-                          ..._tarihler.asMap().entries.map((e) {
-                            final idx = e.key;
-                            final tarih = e.value;
-                            final gun = _gunVerileri[tarih] ?? {};
-                            return Container(
-                              height: rowH,
-                              color:
-                                  idx % 2 == 0 ? Colors.grey[50] : Colors.white,
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: _kanallar.map((k) {
-                                  final key = k['key'] as String;
-                                  final val = gun[key] ?? 0;
-                                  final isYemek = k['tip'] == 'yemek';
-                                  return Padding(
-                                    padding: const EdgeInsets.only(left: 8),
-                                    child: hucre(_fmt(val),
-                                        renk: val > 0
-                                            ? (isYemek
-                                                ? const Color(0xFF2E7D32)
-                                                : const Color(0xFF1565C0))
-                                            : null),
-                                  );
-                                }).toList(),
-                              ),
-                            );
-                          }),
-
-                          // Toplam satırı
-                          Container(
-                            height: rowH,
-                            color: const Color(0xFF0288D1),
-                            padding: const EdgeInsets.only(right: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: _kanallar.map((k) {
-                                final key = k['key'] as String;
-                                final toplam = kanalToplamlari[key] ?? 0;
-                                return Padding(
-                                  padding: const EdgeInsets.only(left: 8),
-                                  child: SizedBox(
-                                    width: colW,
-                                    child: Text(
-                                      _fmt(toplam),
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: toplam > 0
-                                            ? Colors.white
-                                            : Colors.white38,
-                                      ),
-                                      textAlign: TextAlign.right,
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                          ),
-                        ]),
-                  ),
-                ),
-              ]),
+          if (_karsilastirmaAcik && _karsilastirmaKayitlar.isNotEmpty)
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(
+                  child: _ozetKart(_karsilastirmaKayitlar, baslikKars,
+                      Colors.blueGrey[600]!, docId)),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: _ozetKart(
+                      _kayitlar, baslikAna, const Color(0xFF0288D1), docId)),
+            ])
+          else
+            _ozetKart(_kayitlar, baslikAna, const Color(0xFF0288D1), docId),
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            Text(_siralamaArtan ? 'Eskiden Yeniye' : 'Yeniden Eskiye',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            const SizedBox(width: 4),
+            IconButton(
+              icon: Icon(
+                  _siralamaArtan ? Icons.arrow_upward : Icons.arrow_downward,
+                  size: 18,
+                  color: const Color(0xFF0288D1)),
+              onPressed: () => setState(() => _siralamaArtan = !_siralamaArtan),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
             ),
-          ),
+          ]),
+          if (_karsilastirmaAcik && _karsilastirmaKayitlar.isNotEmpty) ...[
+            _detayTablo(
+                _siralamaArtan
+                    ? _karsilastirmaKayitlar
+                    : _karsilastirmaKayitlar.reversed.toList(),
+                docId),
+            const SizedBox(height: 12),
+          ],
+          _detayTablo(
+              _siralamaArtan ? _kayitlar : _kayitlar.reversed.toList(), docId),
+          const SizedBox(height: 32),
         ],
       ]),
     );

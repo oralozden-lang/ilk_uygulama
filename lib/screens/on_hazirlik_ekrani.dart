@@ -68,8 +68,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   final List<YemekKartiGirisi> _yemekKartlari = [];
   final Map<String, TextEditingController> _sistemYemekKartiCtrl = {};
   List<String> _yemekKartiCinsleri = []; // Firestore'dan yüklenir
-  List<Map<String, dynamic>> _yemekKartiTanimlari =
-      []; // {ad, pulseSira, pulseAdi}
+  List<Map<String, dynamic>> _yemekKartiTanimlari = []; // {ad, sira, pulseAdi}
   List<Map<String, dynamic>> _onlineOdemeler = []; // {ad, ctrl}
   Map<String, double> _myDominosOkunan = {}; // My Dominos okunan veriler
   bool _myDominosYuklendi = false;
@@ -446,7 +445,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           if (son != null) _sonKapaliTarih = son;
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   void _bekleyenTransferStreamBaslat() {
@@ -655,8 +654,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     try {
       final tarihKey = _tarihKey(_secilenTarih);
       final data = _otomatikKayitVerisi();
-      // ignore: avoid_print
-      print('KAYIT[$tarihKey] pulseKiyas: ${data['pulseKiyasVerileri']}');
       await FirebaseFirestore.instance
           .collection('subeler')
           .doc(widget.subeKodu)
@@ -671,8 +668,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       if (mounted) {
         setState(() => _degisiklikVar = true); // Hata durumunda geri al
         _appBarMesajGoster('✗ Kayıt Hatası: $e');
-        // ignore: avoid_print
-        print('KAYIT HATASI: $e');
       }
     } finally {
       if (mounted) setState(() => _otomatikKaydediliyor = false);
@@ -686,7 +681,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   void _otomatikKaydetBaslat() {
     if (_readOnly) return;
     _idleTimer?.cancel();
-    _idleTimer = Timer(const Duration(seconds: 60), () {
+    _idleTimer = Timer(const Duration(minutes: 10), () {
       if (mounted && _degisiklikVar) _otomatikKaydet();
     });
   }
@@ -938,7 +933,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       _kilitTimer = Timer(const Duration(minutes: 20), () {
         _kilitBirak();
       });
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   // ── Kilit bırak ──────────────────────────────────────────────────────────
@@ -952,7 +947,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           .collection('kilitler')
           .doc(tarihKey)
           .delete();
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
     _kilitTimer?.cancel();
     if (mounted)
       setState(() {
@@ -995,7 +990,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         adlar[doc.id] = doc.data()['ad'] as String? ?? doc.id;
       }
       if (mounted) setState(() => _subeAdlari = adlar);
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   Future<void> _banknotlariYukle() async {
@@ -1065,7 +1060,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           _giderTurleriListesi = ham;
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   Future<void> _yemekKartiCinsleriniYukle() async {
@@ -1079,8 +1074,12 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         final docs = snap.docs.toList();
         // pulseSira'ya göre sırala
         docs.sort((a, b) {
-          final sa = (a.data()['pulseSira'] as num?)?.toInt() ?? 99;
-          final sb = (b.data()['pulseSira'] as num?)?.toInt() ?? 99;
+          final sa = (a.data()['sira'] as num?)?.toInt() ??
+              (a.data()['pulseSira'] as num?)?.toInt() ??
+              99;
+          final sb = (b.data()['sira'] as num?)?.toInt() ??
+              (b.data()['pulseSira'] as num?)?.toInt() ??
+              99;
           return sa.compareTo(sb);
         });
         final cinsList = docs
@@ -1091,9 +1090,14 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           _yemekKartiCinsleri = cinsList;
           _yemekKartiTanimlari = docs
               .map((d) => {
+                    'id': d.id, // docId — key için
                     'ad': d.data()['ad'] as String? ?? '',
-                    'pulseSira': (d.data()['pulseSira'] as num?)?.toInt() ?? 99,
+                    'sira': (d.data()['sira'] as num?)?.toInt() ??
+                        (d.data()['pulseSira'] as num?)?.toInt() ??
+                        99,
                     'pulseAdi': d.data()['pulseAdi'] as String? ?? '',
+                    'dogruKaynak':
+                        d.data()['dogruKaynak'] as String? ?? 'program',
                   })
               .where((m) => (m['ad'] as String).isNotEmpty)
               .toList();
@@ -1105,7 +1109,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           _pulseKiyasCtrl.putIfAbsent(
               'pulsePos', () => TextEditingController());
           for (final t in _yemekKartiTanimlari) {
-            final key = 'yemek_${t['ad']}';
+            final key =
+                'yemek_${t['id']}'; // docId bazlı — ad değişse etkilenmez
             _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
           }
           // Sistem Pulse ctrl'lerini hazırla
@@ -1118,7 +1123,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
           }
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   // ── Chip sekme yardımcısı ────────────────────────────────────────────────────
@@ -1407,9 +1412,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
 
   Widget _pulseKiyasSekmesi() {
     final posToplamiVal = _toplamPos;
-    // ignore: avoid_print
-    print(
-        'PULSE SEKME BUILD: posToplamiVal=$posToplamiVal, pulseKalemleri=${_pulseKalemleri.map((k) => k['ad']).toList()}');
 
     // Yemek kartı toplamı — tanımlı kartların girilen tutarları
     Map<String, double> yemekTutarlari = {};
@@ -1433,7 +1435,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         : _parseDouble(_gunlukSatisCtrl.text);
 
     // Tüm kalemleri tek listede birleştir — pulseSira'ya göre sırala
-    // Her kalem: {tip, ad, pulseSira, myDomVal, pulseKey}
+    // Her kalem: {tip, ad, sira, myDomVal, pulseKey}
     final List<Map<String, dynamic>> tumKalemler = [];
 
     // Kredi Kartı / POS — pulse kalemleri arasında zaten varsa ekleme
@@ -1445,7 +1447,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       tumKalemler.add({
         'tip': 'pos',
         'ad': 'Kredi Kartı',
-        'pulseSira': 1,
+        'sira': 1,
         'myDomVal': posToplamiVal,
         'pulseKey': 'pulsePos',
       });
@@ -1457,9 +1459,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       tumKalemler.add({
         'tip': 'yemek',
         'ad': ad,
-        'pulseSira': t['pulseSira'] as int? ?? 99,
+        'id': t['id'] as String? ?? '',
+        'sira': t['sira'] as int? ?? 99,
+        'dogruKaynak': t['dogruKaynak'] as String? ?? 'program',
         'myDomVal': yemekTutarlari[ad] ?? 0.0,
-        'pulseKey': 'yemek_${ad}',
+        'pulseKey': 'yemek_${t['id']}', // docId bazlı
       });
     }
 
@@ -1475,9 +1479,11 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       tumKalemler.add({
         'tip': 'online',
         'ad': ad,
-        'pulseSira': o['pulseSira'] as int? ?? 99,
+        'id': o['id'] as String? ?? '',
+        'sira': o['sira'] as int? ?? 99,
+        'dogruKaynak': o['dogruKaynak'] as String? ?? 'myDominos',
         'myDomVal': myDomVal,
-        'pulseKey': ad,
+        'pulseKey': 'online_${o['id']}', // docId bazlı
       });
     }
 
@@ -1491,16 +1497,18 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       tumKalemler.add({
         'tip': isKrediKarti ? 'pos' : 'pulseKalemi',
         'ad': ad,
-        'pulseSira': k['pulseSira'] as int? ?? 99,
+        'id': k['id'] as String? ?? '',
+        'sira': k['sira'] as int? ?? 99,
+        'dogruKaynak': k['dogruKaynak'] as String? ?? 'pulse',
         'myDomVal': myDomVal,
-        'pulseKey': ad,
+        'pulseKey': 'pulse_${k['id']}', // docId bazlı
       });
     }
 
     // pulseSira'ya göre sırala
     tumKalemler.sort((a, b) {
-      final sa = a['pulseSira'] as int;
-      final sb = b['pulseSira'] as int;
+      final sa = a['sira'] as int? ?? 99;
+      final sb = b['sira'] as int? ?? 99;
       return sa.compareTo(sb);
     });
 
@@ -1820,7 +1828,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                           ...gorunenler.map((k) {
                             final ad = k['ad'] as String;
                             final pulseKey = k['pulseKey'] as String;
-                            final pulseSira = k['pulseSira'] as int;
+                            final sira = k['sira'] as int? ?? 99;
                             final tip = k['tip'] as String;
                             final myDomVal = tip == 'pos'
                                 ? _toplamPos
@@ -1883,7 +1891,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
                                             children: [
-                                          Text('$pulseSira. $ad',
+                                          Text('$sira. $ad',
                                               style: const TextStyle(
                                                   fontSize: 11,
                                                   fontWeight: FontWeight.w600,
@@ -2187,7 +2195,6 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                                                             _gercekDegisiklikVar =
                                                                 true;
                                                         });
-                                                        _anindaKaydet();
                                                       },
                                                 child: Container(
                                                   width: 24,
@@ -2702,17 +2709,83 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         final key = pulseAdi.isNotEmpty
             ? pulseAdi
             : ad.toUpperCase().replaceAll(' ', '');
+        final docId = doc.id;
         if (tip == 'online')
-          onlineEslestirme.add({'pulseAdi': key, 'sistemAdi': ad});
+          onlineEslestirme
+              .add({'pulseAdi': key, 'sistemAdi': ad, 'docId': docId});
         if (tip == 'yemekKarti')
-          yemekEslestirme.add({'pulseAdi': key, 'sistemAdi': ad});
+          yemekEslestirme
+              .add({'pulseAdi': key, 'sistemAdi': ad, 'docId': docId});
         if (tip == 'pulseKalemi')
-          digerEslestirme.add({'pulseAdi': key, 'sistemAdi': ad});
+          digerEslestirme
+              .add({'pulseAdi': key, 'sistemAdi': ad, 'docId': docId});
       }
 
       // Fuzzy lookup — Gemini'nin ekrandan okuduğu ham adı tanımlı Pulse adıyla eşleştirir
       // Gemini artık ham ekran adını döndürür (sistem adını değil)
-      String? fuzzyBul(String geminiAd, List<Map<String, String>> liste) {
+      // docId de döndüren versiyon — Gemini eşleştirmesinde kullanılır
+      Map<String, dynamic>? fuzzyBulEslesme(
+          String geminiAd, List<Map<String, dynamic>> liste) {
+        final aranan = geminiAd.toUpperCase().trim();
+        for (final e in liste) {
+          if (e['pulseAdi'] == aranan) return e;
+        }
+        for (final e in liste) {
+          final pulseAdi = (e['pulseAdi'] as String? ?? '');
+          if (pulseAdi.isNotEmpty && aranan.contains(pulseAdi)) return e;
+        }
+        for (final e in liste) {
+          final pulseAdi = (e['pulseAdi'] as String? ?? '');
+          if (pulseAdi.isNotEmpty && pulseAdi.contains(aranan)) return e;
+        }
+        final arananTokenlar =
+            aranan.split(' ').where((t) => t.length >= 2).toList();
+        if (arananTokenlar.isNotEmpty) {
+          Map<String, dynamic>? enIyi;
+          int enIyiSkor = 0;
+          for (final e in liste) {
+            final pulseTokenlar = (e['pulseAdi'] as String? ?? '')
+                .split(' ')
+                .where((t) => t.length >= 2)
+                .toList();
+            int skor = 0;
+            for (final at in arananTokenlar) {
+              for (final pt in pulseTokenlar) {
+                if (at == pt) {
+                  skor += 3;
+                  break;
+                }
+                if (pt.startsWith(at) || at.startsWith(pt)) {
+                  skor += 2;
+                  break;
+                }
+                if (at.length >= 3 &&
+                    pt.length >= 3 &&
+                    at.substring(0, 3) == pt.substring(0, 3)) {
+                  skor += 1;
+                  break;
+                }
+              }
+            }
+            final oran = skor / (arananTokenlar.length * 3);
+            if (oran >= 0.6 && skor > enIyiSkor) {
+              enIyiSkor = skor;
+              enIyi = e;
+            }
+          }
+          if (enIyi != null) return enIyi;
+        }
+        final ilkKelime = aranan.split(' ').first;
+        if (ilkKelime.length >= 4) {
+          for (final e in liste) {
+            if ((e['pulseAdi'] as String? ?? '').startsWith(ilkKelime))
+              return e;
+          }
+        }
+        return null;
+      }
+
+      String? fuzzyBul(String geminiAd, List<Map<String, dynamic>> liste) {
         final aranan = geminiAd.toUpperCase().trim();
         // 1. Tam eşleşme
         for (final e in liste) {
@@ -2955,8 +3028,6 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 
       // JSON parse
       final cleanText = text.replaceAll(RegExp(r'```json|```'), '').trim();
-      // ignore: avoid_print
-      print('GEMINI PULSE YANIT: $cleanText');
       final Map<String, dynamic> geminiOkunan = jsonDecode(cleanText);
 
       // Yanlış resim kontrolü
@@ -3019,28 +3090,33 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
       if (geminiOkunan['online'] != null) {
         for (final o in (geminiOkunan['online'] as List)) {
           final pulseAd = (o['ad'] as String? ?? '').toUpperCase();
-          final sistemAd = fuzzyBul(pulseAd, onlineEslestirme);
-          if (sistemAd != null)
-            _pulseKiyasCtrl.putIfAbsent(
-                sistemAd, () => TextEditingController());
+          final eslesme = fuzzyBulEslesme(pulseAd, onlineEslestirme);
+          if (eslesme != null) {
+            final key = 'online_${eslesme['docId']}';
+            _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
+          }
         }
       }
       if (geminiOkunan['yemek'] != null) {
         for (final y in (geminiOkunan['yemek'] as List)) {
           final pulseAd = (y['ad'] as String? ?? '').toUpperCase();
-          final sistemAd = fuzzyBul(pulseAd, yemekEslestirme);
-          if (sistemAd != null)
-            _pulseKiyasCtrl.putIfAbsent(
-                'yemek_$sistemAd', () => TextEditingController());
+          final eslesme = fuzzyBulEslesme(pulseAd, yemekEslestirme);
+          if (eslesme != null) {
+            final docId = eslesme['docId'] as String;
+            final key = 'yemek_$docId';
+            _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
+          }
         }
       }
       if (geminiOkunan['diger'] != null) {
         for (final d in (geminiOkunan['diger'] as List)) {
           final pulseAd = (d['ad'] as String? ?? '').toUpperCase();
-          final sistemAd = fuzzyBul(pulseAd, digerEslestirme);
-          if (sistemAd != null)
-            _pulseKiyasCtrl.putIfAbsent(
-                sistemAd, () => TextEditingController());
+          final eslesme = fuzzyBulEslesme(pulseAd, digerEslestirme);
+          if (eslesme != null) {
+            final docId = eslesme['docId'] as String;
+            final key = 'pulse_$docId';
+            _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
+          }
         }
       }
 
@@ -3063,23 +3139,23 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         if (geminiOkunan['online'] != null) {
           for (final o in (geminiOkunan['online'] as List)) {
             final pulseAd = (o['ad'] as String? ?? '').toUpperCase();
-            final sistemAd = fuzzyBul(pulseAd, onlineEslestirme);
+            final eslesme = fuzzyBulEslesme(pulseAd, onlineEslestirme);
             final tutar = (o['tutar'] as num? ?? 0).toDouble();
-            if (sistemAd != null &&
-                tutar > 0 &&
-                _pulseKiyasCtrl.containsKey(sistemAd)) {
-              _pulseKiyasCtrl[sistemAd]!.text =
-                  _formatTL(tutar).replaceAll(' ₺', '');
+            if (eslesme != null && tutar > 0) {
+              final key = 'online_${eslesme['docId']}';
+              if (_pulseKiyasCtrl.containsKey(key))
+                _pulseKiyasCtrl[key]!.text =
+                    _formatTL(tutar).replaceAll(' ₺', '');
             }
           }
         }
         if (geminiOkunan['yemek'] != null) {
           for (final y in (geminiOkunan['yemek'] as List)) {
             final pulseAd = (y['ad'] as String? ?? '').toUpperCase();
-            final sistemAd = fuzzyBul(pulseAd, yemekEslestirme);
+            final eslesme = fuzzyBulEslesme(pulseAd, yemekEslestirme);
             final tutar = (y['tutar'] as num? ?? 0).toDouble();
-            final key = 'yemek_$sistemAd';
-            if (sistemAd != null &&
+            final key = eslesme != null ? 'yemek_${eslesme['docId']}' : '';
+            if (eslesme != null &&
                 tutar > 0 &&
                 _pulseKiyasCtrl.containsKey(key)) {
               _pulseKiyasCtrl[key]!.text =
@@ -3090,13 +3166,13 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         if (geminiOkunan['diger'] != null) {
           for (final d in (geminiOkunan['diger'] as List)) {
             final pulseAd = (d['ad'] as String? ?? '').toUpperCase();
-            final sistemAd = fuzzyBul(pulseAd, digerEslestirme);
+            final eslesme = fuzzyBulEslesme(pulseAd, digerEslestirme);
             final tutar = (d['tutar'] as num? ?? 0).toDouble();
-            if (sistemAd != null &&
-                tutar > 0 &&
-                _pulseKiyasCtrl.containsKey(sistemAd)) {
-              _pulseKiyasCtrl[sistemAd]!.text =
-                  _formatTL(tutar).replaceAll(' ₺', '');
+            if (eslesme != null && tutar > 0) {
+              final key = 'pulse_${eslesme['docId']}';
+              if (_pulseKiyasCtrl.containsKey(key))
+                _pulseKiyasCtrl[key]!.text =
+                    _formatTL(tutar).replaceAll(' ₺', '');
             }
           }
         }
@@ -3182,41 +3258,41 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
           .get();
 
       // digerEkranAdi → sistemAdi lookup tablosu
-      final List<Map<String, String>> myDomEslestirme = [];
+      final List<Map<String, dynamic>> myDomEslestirme = [];
       for (final d in onlineSnap.docs) {
         final ad = d.data()['ad'] as String? ?? '';
         final digerAd =
             (d.data()['digerEkranAdi'] as String? ?? '').toUpperCase().trim();
         if (ad.isEmpty) continue;
         final key = digerAd.isNotEmpty ? digerAd : ad.toUpperCase();
-        myDomEslestirme.add({'digerAdi': key, 'sistemAdi': ad});
+        myDomEslestirme.add({'digerAdi': key, 'sistemAdi': ad, 'docId': d.id});
       }
 
       // MyDominos fuzzy eşleştirme — Pulse fuzzyBul ile aynı mantık
-      String? myDomFuzzyBul(String geminiAd) {
+      Map<String, dynamic>? myDomFuzzyBul(String geminiAd) {
         final aranan = geminiAd.toUpperCase().trim();
         for (final e in myDomEslestirme) {
-          if (e['digerAdi'] == aranan) return e['sistemAdi'];
+          if (e['digerAdi'] == aranan) return e;
         }
         for (final e in myDomEslestirme) {
-          final digerAdi = e['digerAdi']!;
-          if (digerAdi.isNotEmpty && aranan.contains(digerAdi))
-            return e['sistemAdi'];
+          final digerAdi = (e['digerAdi'] as String? ?? '');
+          if (digerAdi.isNotEmpty && aranan.contains(digerAdi)) return e;
         }
         for (final e in myDomEslestirme) {
-          final digerAdi = e['digerAdi']!;
-          if (digerAdi.isNotEmpty && digerAdi.contains(aranan))
-            return e['sistemAdi'];
+          final digerAdi = (e['digerAdi'] as String? ?? '');
+          if (digerAdi.isNotEmpty && digerAdi.contains(aranan)) return e;
         }
-        // Token bazlı — kısaltmalar için
+        // Token bazlı
         final arananTokenlar =
             aranan.split(' ').where((t) => t.length >= 2).toList();
         if (arananTokenlar.isNotEmpty) {
-          String? enIyi;
+          Map<String, dynamic>? enIyi;
           int enIyiSkor = 0;
           for (final e in myDomEslestirme) {
-            final digerTokenlar =
-                e['digerAdi']!.split(' ').where((t) => t.length >= 2).toList();
+            final digerTokenlar = (e['digerAdi'] as String? ?? '')
+                .split(' ')
+                .where((t) => t.length >= 2)
+                .toList();
             int skor = 0;
             for (final at in arananTokenlar) {
               for (final dt in digerTokenlar) {
@@ -3239,7 +3315,7 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
             final oran = skor / (arananTokenlar.length * 3);
             if (oran >= 0.6 && skor > enIyiSkor) {
               enIyiSkor = skor;
-              enIyi = e['sistemAdi'];
+              enIyi = e;
             }
           }
           if (enIyi != null) return enIyi;
@@ -3247,7 +3323,8 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         final ilkKelime = aranan.split(' ').first;
         if (ilkKelime.length >= 4) {
           for (final e in myDomEslestirme) {
-            if (e['digerAdi']!.startsWith(ilkKelime)) return e['sistemAdi'];
+            if ((e['digerAdi'] as String? ?? '').startsWith(ilkKelime))
+              return e;
           }
         }
         return null;
@@ -3416,9 +3493,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           final geminiAd = o['ad'] as String? ?? '';
           final tutar = (o['tutar'] as num? ?? 0).toDouble();
           if (geminiAd.isEmpty || tutar <= 0) continue;
-          // Gemini ham ekran adını döndürür — fuzzy ile sistem adına çevir
-          final sistemAd = myDomFuzzyBul(geminiAd) ?? geminiAd;
-          yeniOkunan[sistemAd] = (yeniOkunan[sistemAd] ?? 0) + tutar;
+          // Gemini ham ekran adını döndürür — fuzzy ile docId'ye çevir
+          final eslesme = myDomFuzzyBul(geminiAd);
+          final key = eslesme != null
+              ? 'online_${eslesme['docId']}'
+              : 'online_$geminiAd'; // eşleşme yoksa ham adla yaz
+          yeniOkunan[key] = (yeniOkunan[key] ?? 0) + tutar;
         }
       }
 
@@ -3483,13 +3563,21 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
         // Sırala
         onlineDocs.sort((a, b) {
-          final sa = (a.data()['sira'] as num?)?.toInt() ?? 999;
-          final sb = (b.data()['sira'] as num?)?.toInt() ?? 999;
+          final sa = (a.data()['sira'] as num?)?.toInt() ??
+              (a.data()['pulseSira'] as num?)?.toInt() ??
+              999;
+          final sb = (b.data()['sira'] as num?)?.toInt() ??
+              (b.data()['pulseSira'] as num?)?.toInt() ??
+              999;
           return sa.compareTo(sb);
         });
         pulseDocs.sort((a, b) {
-          final sa = (a.data()['pulseSira'] as num?)?.toInt() ?? 999;
-          final sb = (b.data()['pulseSira'] as num?)?.toInt() ?? 999;
+          final sa = (a.data()['sira'] as num?)?.toInt() ??
+              (a.data()['pulseSira'] as num?)?.toInt() ??
+              999;
+          final sb = (b.data()['sira'] as num?)?.toInt() ??
+              (b.data()['pulseSira'] as num?)?.toInt() ??
+              999;
           return sa.compareTo(sb);
         });
 
@@ -3500,61 +3588,77 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
         setState(() {
           _onlineOdemeAdlari = siraliAdlar;
-          final mevcutAdlar =
-              _onlineOdemeler.map((o) => o['ad'] as String).toSet();
+          final mevcutIdler =
+              _onlineOdemeler.map((o) => o['id'] as String).toSet();
           for (var doc in onlineDocs) {
+            final id = doc.id; // docId — sabit
             final ad = doc.data()['ad'] as String? ?? '';
             if (ad.isEmpty) continue;
-            if (!mevcutAdlar.contains(ad)) {
+            final sira = (doc.data()['sira'] as num?)?.toInt() ??
+                (doc.data()['pulseSira'] as num?)?.toInt() ??
+                99;
+            if (!mevcutIdler.contains(id)) {
               _onlineOdemeler.add({
+                'id': id,
                 'ad': ad,
                 'ctrl': TextEditingController(),
-                'pulseSira': (doc.data()['pulseSira'] as num?)?.toInt() ?? 99,
+                'sira': sira,
+                'dogruKaynak':
+                    doc.data()['dogruKaynak'] as String? ?? 'myDominos',
                 'digerEkranAdi': doc.data()['digerEkranAdi'] ?? '',
               });
             } else {
-              final idx = _onlineOdemeler.indexWhere((o) => o['ad'] == ad);
+              final idx = _onlineOdemeler.indexWhere((o) => o['id'] == id);
               if (idx >= 0) {
-                _onlineOdemeler[idx]['pulseSira'] =
-                    (doc.data()['pulseSira'] as num?)?.toInt() ?? 99;
+                _onlineOdemeler[idx]['ad'] = ad;
+                _onlineOdemeler[idx]['sira'] = sira;
+                _onlineOdemeler[idx]['dogruKaynak'] =
+                    doc.data()['dogruKaynak'] as String? ?? 'myDominos';
                 _onlineOdemeler[idx]['digerEkranAdi'] =
                     doc.data()['digerEkranAdi'] ?? '';
               }
             }
           }
-          // pulseSira'ya göre sırala
+          // sira'ya göre sırala
           _onlineOdemeler.sort((a, b) {
-            final sa = (a['pulseSira'] as int? ?? 99);
-            final sb = (b['pulseSira'] as int? ?? 99);
+            final sa = (a['sira'] as int? ?? 99);
+            final sb = (b['sira'] as int? ?? 99);
             return sa.compareTo(sb);
           });
 
           // Pulse kalemleri
           _pulseKalemleri = pulseDocs
               .map((d) => {
+                    'id': d.id,
                     'ad': d.data()['ad'] as String? ?? '',
                     'pulseAdi': d.data()['pulseAdi'] as String? ?? '',
-                    'pulseSira': d.data()['pulseSira'] ?? 99,
+                    'sira': (d.data()['sira'] as num?)?.toInt() ??
+                        (d.data()['pulseSira'] as num?)?.toInt() ??
+                        99,
+                    'dogruKaynak':
+                        d.data()['dogruKaynak'] as String? ?? 'pulse',
                   })
               .where((m) => (m['ad'] as String).isNotEmpty)
               .toList();
 
           // Online ve pulse kalem ctrl'lerini hazırla
           for (var o in _onlineOdemeler) {
-            final ad = o['ad'] as String;
-            _pulseKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
-            _myDomKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
+            final id = o['id'] as String;
+            final key = 'online_$id'; // docId bazlı
+            _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
+            _myDomKiyasCtrl.putIfAbsent(key, () => TextEditingController());
           }
           for (var k in _pulseKalemleri) {
-            final ad = k['ad'] as String;
-            _pulseKiyasCtrl.putIfAbsent(ad, () => TextEditingController());
+            final id = k['id'] as String;
+            final key = 'pulse_$id'; // docId bazlı
+            _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
           }
           // Yeni ctrl'lere listener bağla
           for (var c in _pulseKiyasCtrl.values) _pulseCtrlBagla(c);
           for (var c in _myDomKiyasCtrl.values) _pulseCtrlBagla(c);
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   Future<void> _banknotAyarlariniKaydet() async {
@@ -3563,7 +3667,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           .collection('ayarlar')
           .doc('banknotlar')
           .set({'liste': _banknotlar, 'flotSiniri': _flotSiniri});
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+    }
   }
 
   @override
@@ -3692,7 +3798,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
               .collection('gunluk')
               .doc(_tarihKey(_secilenTarih))
               .set(_otomatikKayitVerisi(), SetOptions(merge: true));
-        } catch (_) {}
+        } catch (e) {
+          if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+        }
       }
       return true;
     }
@@ -3763,7 +3871,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
             .doc(tarihKey)
             .set(_otomatikKayitVerisi(), SetOptions(merge: true));
         if (mounted) setState(() => _degisiklikVar = false);
-      } catch (_) {}
+      } catch (e) {
+        if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+      }
     }
     if (!_degisiklikVar) return true;
     try {
@@ -3775,7 +3885,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           .doc(tarihKey)
           .set(_otomatikKayitVerisi(), SetOptions(merge: true));
       if (mounted) setState(() => _degisiklikVar = false);
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+    }
     await _kilitBirak();
     return true;
   }
@@ -4082,7 +4194,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           ],
         ),
       );
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   // ── Bekleyen transferleri bildir ────────────────────────────────────────────
@@ -4308,7 +4420,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                     }).toList();
                     await gunRef.update({'transferler': guncel});
                   }
-                } catch (_) {}
+                } catch (e) {
+                  if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+                }
               }
             }
           }
@@ -4820,7 +4934,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                 }).toList();
                 await gunRef.update({'transferler': guncel});
               }
-            } catch (_) {}
+            } catch (e) {
+              if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+            }
           }
         }
       }
@@ -5155,7 +5271,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           if (_bekleyenTransferSayisi > 0) _bekleyenTransferSayisi--;
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   Future<void> _transferiReddet(
@@ -5210,7 +5326,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           if (_bekleyenTransferSayisi > 0) _bekleyenTransferSayisi--;
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   void _mevcutKaydiYukle(Map<String, dynamic> data) {
@@ -5295,8 +5411,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       _myDominosOkunan.clear();
       final pulseKiyas =
           (data['pulseKiyasVerileri'] as Map<String, dynamic>?) ?? {};
-      // ignore: avoid_print
-      print('YUKLE[${data['tarih']}] pulseKiyas: $pulseKiyas');
       for (var e in pulseKiyas.entries) {
         _pulseKiyasCtrl.putIfAbsent(e.key, () => TextEditingController());
         _pulseKiyasCtrl[e.key]!.text = e.value.toString();
@@ -5713,7 +5827,9 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       if (mevcut.exists) {
         await subeRef.update({'transferler': []});
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) _appBarMesajGoster('✗ Kayıt hatası');
+    }
   }
 
   Future<void> _oncekiGundenDovizYukle() async {
@@ -5762,7 +5878,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           }
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   // Sadece devredenFlot ve oncekiAnaKasaKalanini bir önceki günden yükle
@@ -5798,7 +5914,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           });
         }
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   Future<void> _oncekiGundenYukle() async {
@@ -5874,7 +5990,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           }
         });
       }
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   // ── Hesaplamalar ────────────────────────────────────────────────────────────
@@ -6180,7 +6296,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           backgroundColor: Colors.green,
         ),
       );
-    } catch (_) {}
+    } catch (_) {/* sessiz — yükleme/işlem başarısız */}
   }
 
   Future<void> _kaydet() async {
@@ -6380,7 +6496,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           );
           if (devamEt != true) return;
         }
-      } catch (_) {}
+      } catch (_) {/* sessiz — yükleme/işlem başarısız */}
     }
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -7064,7 +7180,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
           }
           return;
         }
-      } catch (_) {}
+      } catch (_) {/* sessiz — yükleme/işlem başarısız */}
 
       kontrol = kontrol.add(const Duration(days: 1));
     }
@@ -7834,7 +7950,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     if (_pulseKontrolOnaylandi)
                                       _pulseKontrolOnaylandi = false;
                                   });
-                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -8043,7 +8158,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     if (_pulseKontrolOnaylandi)
                                       _pulseKontrolOnaylandi = false;
                                   });
-                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -8518,7 +8632,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _harcamalar.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -8967,7 +9080,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                   _dovizler.removeAt(idx);
                                   _degisiklikVar = true;
                                 });
-                                _anindaKaydet();
                               },
                       ),
                     ],
@@ -9832,16 +9944,24 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     // Pulse kanalları
     final yemeklerPdf = <String, double>{};
     final onlinelerPdf = <String, double>{};
+    // docId → ad lookup
+    final yemekIdAdPdf = {
+      for (final t in _yemekKartiTanimlari) t['id'] as String: t['ad'] as String
+    };
+    final onlineIdAdPdf = {
+      for (final o in _onlineOdemeler) o['id'] as String: o['ad'] as String
+    };
+
     for (final entry in _pulseKiyasCtrl.entries) {
       final key = entry.key;
       final val = _parseDouble(entry.value.text);
       if (val <= 0) continue;
       if (key.startsWith('yemek_')) {
-        yemeklerPdf[key.substring(6)] = val;
-      } else if (key != 'pulsePos' &&
-          key != 'pulseBrut' &&
-          key != 'pulseBanka') {
-        onlinelerPdf[key] = val;
+        final docId = key.substring(6);
+        yemeklerPdf[yemekIdAdPdf[docId] ?? docId] = val;
+      } else if (key.startsWith('online_')) {
+        final docId = key.substring(7);
+        onlinelerPdf[onlineIdAdPdf[docId] ?? docId] = val;
       }
     }
     final yemekToplamPdf = yemeklerPdf.values.fold(0.0, (s, v) => s + v);
@@ -10302,19 +10422,28 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
     final yemekler = <String, double>{};
     final onlineler = <String, double>{};
 
+    // docId → ad lookup map'leri
+    final yemekIdAd = {
+      for (final t in _yemekKartiTanimlari) t['id'] as String: t['ad'] as String
+    };
+    final onlineIdAd = {
+      for (final o in _onlineOdemeler) o['id'] as String: o['ad'] as String
+    };
+
     for (final entry in _pulseKiyasCtrl.entries) {
       final key = entry.key;
       final val = _parseDouble(entry.value.text);
       if (val <= 0) continue;
       if (key.startsWith('yemek_')) {
-        final ad = key.substring(6);
+        final docId = key.substring(6);
+        final ad = yemekIdAd[docId] ?? docId;
         yemekler[ad] = val;
-      } else if (key != 'pulsePos' &&
-          key != 'pulseBrut' &&
-          key != 'pulseBanka') {
-        // Online kanallar — rezerve key'ler hariç
-        onlineler[key] = val;
+      } else if (key.startsWith('online_')) {
+        final docId = key.substring(7);
+        final ad = onlineIdAd[docId] ?? docId;
+        onlineler[ad] = val;
       }
+      // 'pulse_', 'pulsePos', 'pulseBrut', 'pulseBanka' — widget'a dahil değil
     }
 
     if (yemekler.isEmpty && onlineler.isEmpty) return const SizedBox.shrink();
@@ -11540,7 +11669,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                 _digerAlimlar.removeAt(idx);
                                 _degisiklikVar = true;
                               });
-                              _anindaKaydet();
                             },
                     ),
                   ],
@@ -11686,7 +11814,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _anaKasaHarcamalari.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -11840,7 +11967,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                     _nakitCikislar.removeAt(idx);
                                     _degisiklikVar = true;
                                   });
-                                  _anindaKaydet();
                                 },
                         ),
                     ],
@@ -11971,7 +12097,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                       _nakitDovizler.removeAt(idx);
                                       _degisiklikVar = true;
                                     });
-                                    _anindaKaydet();
                                   },
                           ),
                         ],
@@ -12326,7 +12451,6 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                                       _bankaDovizler.removeAt(idx);
                                       _degisiklikVar = true;
                                     });
-                                    _anindaKaydet();
                                   },
                           ),
                         ],
