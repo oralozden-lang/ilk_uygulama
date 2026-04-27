@@ -180,13 +180,13 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     int _sonTabIndex = 0;
     _tabController.addListener(() {
       if (!mounted) return;
-      // Sadece gerçek sekme değişiminde tetikle
-      if (_tabController.indexIsChanging) {
-        if (_tabController.index != _sonTabIndex) {
-          _sonTabIndex = _tabController.index;
-          setState(() {});
-          // Sekme değişince bekleyen kayıt varsa kaydet
-          if (_degisiklikVar) _anindaKaydet();
+      // indexIsChanging VEYA index değişimi — swipe dahil her geçişi yakala
+      if (_tabController.index != _sonTabIndex) {
+        _sonTabIndex = _tabController.index;
+        setState(() {}); // chip ikonları güncellenir
+        // Sekme değişince bekleyen kayıt varsa kaydet
+        if (_degisiklikVar) {
+          _anindaKaydet();
         }
       }
     });
@@ -2696,44 +2696,57 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     required String apiKey,
     required String model,
   }) async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse(
-              'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey',
-            ),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'contents': [
-                {
-                  'parts': [
-                    {
-                      'inline_data': {
-                        'mime_type': mimeType,
-                        'data': base64Image,
-                      }
-                    },
-                    {'text': prompt}
-                  ]
-                }
-              ],
-              'generationConfig': {'temperature': 0},
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
+    for (int deneme = 1; deneme <= 2; deneme++) {
+      try {
+        final response = await http
+            .post(
+              Uri.parse(
+                'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey',
+              ),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'contents': [
+                  {
+                    'parts': [
+                      {
+                        'inline_data': {
+                          'mime_type': mimeType,
+                          'data': base64Image,
+                        }
+                      },
+                      {'text': prompt}
+                    ]
+                  }
+                ],
+                'generationConfig': {'temperature': 0},
+              }),
+            )
+            .timeout(const Duration(seconds: 30));
 
-      if (response.statusCode == 200) {
-        final responseJson = jsonDecode(response.body);
-        final text = responseJson['candidates']?[0]?['content']?['parts']?[0]
-                ?['text'] as String? ??
-            '';
-        return text.isNotEmpty ? text : null;
+        if (response.statusCode == 200) {
+          final responseJson = jsonDecode(response.body);
+          final text = responseJson['candidates']?[0]?['content']?['parts']?[0]
+                  ?['text'] as String? ??
+              '';
+          return text.isNotEmpty ? text : null;
+        }
+        // 429 = kota doldu → direkt sonraki modele geç
+        if (response.statusCode == 429) return null;
+        // 503 = meşgul → 5sn bekle, 1 kez retry
+        if (response.statusCode == 503 && deneme == 1) {
+          await Future.delayed(const Duration(seconds: 5));
+          continue;
+        }
+        return null;
+      } catch (_) {
+        if (deneme == 1) {
+          await Future.delayed(const Duration(seconds: 3));
+          continue;
+        }
+        return null;
       }
-      // 429 veya 503 — sonraki modele geç
-      return null;
-    } catch (_) {
-      return null;
     }
+    return null;
   }
 
   // Groq ile okuma — llama-4-scout vision
@@ -2743,50 +2756,64 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     required String prompt,
     required String apiKey,
   }) async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $apiKey',
-            },
-            body: jsonEncode({
-              'model': 'meta-llama/llama-4-scout-17b-16e-instruct',
-              'messages': [
-                {
-                  'role': 'user',
-                  'content': [
-                    {
-                      'type': 'image_url',
-                      'image_url': {
-                        'url': 'data:$mimeType;base64,$base64Image',
+    for (int deneme = 1; deneme <= 2; deneme++) {
+      try {
+        final response = await http
+            .post(
+              Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $apiKey',
+              },
+              body: jsonEncode({
+                'model': 'meta-llama/llama-4-scout-17b-16e-instruct',
+                'messages': [
+                  {
+                    'role': 'user',
+                    'content': [
+                      {
+                        'type': 'image_url',
+                        'image_url': {
+                          'url': 'data:$mimeType;base64,$base64Image',
+                        },
                       },
-                    },
-                    {
-                      'type': 'text',
-                      'text': prompt,
-                    },
-                  ],
-                }
-              ],
-              'temperature': 0,
-              'max_tokens': 2048,
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
+                      {
+                        'type': 'text',
+                        'text': prompt,
+                      },
+                    ],
+                  }
+                ],
+                'temperature': 0,
+                'max_tokens': 2048,
+              }),
+            )
+            .timeout(const Duration(seconds: 30));
 
-      if (response.statusCode == 200) {
-        final responseJson = jsonDecode(response.body);
-        final text =
-            responseJson['choices']?[0]?['message']?['content'] as String? ??
-                '';
-        return text.isNotEmpty ? text : null;
+        if (response.statusCode == 200) {
+          final responseJson = jsonDecode(response.body);
+          final text =
+              responseJson['choices']?[0]?['message']?['content'] as String? ??
+                  '';
+          return text.isNotEmpty ? text : null;
+        }
+        // 429 = kota → direkt çık
+        if (response.statusCode == 429) return null;
+        // 503 = meşgul → 5sn bekle, retry
+        if (response.statusCode == 503 && deneme == 1) {
+          await Future.delayed(const Duration(seconds: 5));
+          continue;
+        }
+        return null;
+      } catch (_) {
+        if (deneme == 1) {
+          await Future.delayed(const Duration(seconds: 3));
+          continue;
+        }
+        return null;
       }
-      return null;
-    } catch (_) {
-      return null;
     }
+    return null;
   }
 
   Future<void> _pulseResmiOku(
@@ -3056,7 +3083,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       final prompt = """Bu bir Pulse POS/kasa programı ekran görüntüsü.
 ÖNCE iki kontrol yap:
 1. Resim yeterince net mi? Yazılar okunabiliyor mu? Net değilse döndür: {"hata": "Resim bulanık veya okunamıyor, daha yakın ve sabit tutarak tekrar çekin"}
-2. Resim gerçekten bir Pulse POS/kasa ekranı mı? Değilse döndür: {"hata": "Bu resim Pulse ekranı değil"}
+2. Resim gerçekten bir Pulse POS/kasa ekranı mı? Pulse ekranında genellikle "Brüt Satış", "Kredi Kartı", "Banka Parası" gibi Türkçe kasa/POS terimleri bulunur. My Dominos, tarayıcı, başka uygulama veya farklı bir ekranın görüntüsü ise döndür: {"hata": "Bu resim Pulse ekranı değil"}
 
 Pulse ekranıysa aşağıdaki verileri JSON formatında çıkar:
 - brutsatis: "$brutSatisPulseAdi" rakamı (sadece sayı)
@@ -3168,7 +3195,27 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         _pulseKiyasCtrl.putIfAbsent('pulseBrut', () => TextEditingController());
       }
       if (geminiOkunan['kredikart'] != null) {
-        _pulseKiyasCtrl.putIfAbsent('pulsePos', () => TextEditingController());
+        // Kredi Kartı docId'sini digerEslestirme'den bul
+        final krediEslesme =
+            digerEslestirme.cast<Map<String, dynamic>>().firstWhere(
+          (e) {
+            final ad = (e['sistemAdi'] as String? ?? '').toLowerCase();
+            final pulseAdi = (e['pulseAdi'] as String? ?? '').toLowerCase();
+            return ad.contains('kredi') ||
+                ad.contains('pos') ||
+                pulseAdi.contains('kredi') ||
+                pulseAdi.contains('pos');
+          },
+          orElse: () => <String, dynamic>{},
+        );
+        if (krediEslesme.isNotEmpty) {
+          final key = 'pulse_${krediEslesme['docId']}';
+          _pulseKiyasCtrl.putIfAbsent(key, () => TextEditingController());
+        } else {
+          // Fallback: eski pulsePos key'i
+          _pulseKiyasCtrl.putIfAbsent(
+              'pulsePos', () => TextEditingController());
+        }
       }
       if (geminiOkunan['online'] != null) {
         for (final o in (geminiOkunan['online'] as List)) {
@@ -3216,8 +3263,26 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         }
         if (geminiOkunan['kredikart'] != null) {
           final val = (geminiOkunan['kredikart'] as num).toDouble();
-          _pulseKiyasCtrl['pulsePos']!.text =
-              _formatTL(val).replaceAll(' ₺', '');
+          // Kredi Kartı docId'sini bul
+          final krediEslesme =
+              digerEslestirme.cast<Map<String, dynamic>>().firstWhere(
+            (e) {
+              final ad = (e['sistemAdi'] as String? ?? '').toLowerCase();
+              final pulseAdi = (e['pulseAdi'] as String? ?? '').toLowerCase();
+              return ad.contains('kredi') ||
+                  ad.contains('pos') ||
+                  pulseAdi.contains('kredi') ||
+                  pulseAdi.contains('pos');
+            },
+            orElse: () => <String, dynamic>{},
+          );
+          final krediKey = krediEslesme.isNotEmpty
+              ? 'pulse_${krediEslesme['docId']}'
+              : 'pulsePos'; // fallback
+          if (_pulseKiyasCtrl.containsKey(krediKey)) {
+            _pulseKiyasCtrl[krediKey]!.text =
+                _formatTL(val).replaceAll(' ₺', '');
+          }
         }
         if (geminiOkunan['online'] != null) {
           for (final o in (geminiOkunan['online'] as List)) {
@@ -3430,7 +3495,7 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
       final prompt = """Bu bir My Dominos sipariş dökümü ekran görüntüsü.
 ÖNCE iki kontrol yap:
 1. Resim yeterince net mi? Yazılar okunabiliyor mu? Net değilse döndür: {"hata": "Resim bulanık veya okunamıyor, daha yakın ve sabit tutarak tekrar çekin"}
-2. Resim gerçekten My Dominos uygulaması/sitesinden bir sipariş/satış raporu mu? Değilse döndür: {"hata": "Bu resim My Dominos ekranı değil"}
+2. Resim gerçekten My Dominos uygulaması/sitesinden bir sipariş/satış raporu mu? My Dominos ekranında genellikle sipariş listesi, ödeme yöntemi ve tutar bilgileri bulunur. Pulse POS, kasa programı veya başka bir uygulama ekranı ise döndür: {"hata": "Bu resim My Dominos ekranı değil"}
 
 My Dominos ekranıysa:
 Sadece "Online Kredi" veya "Banka Kartı" içeren satırların Ciro değerlerini al.
@@ -13662,8 +13727,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                             InkWell(
                               onTap: () {
                                 if (_tabController.index > 0) {
-                                  setState(() => _tabController
-                                      .animateTo(_tabController.index - 1));
+                                  _tabController
+                                      .animateTo(_tabController.index - 1);
                                 }
                               },
                               borderRadius: BorderRadius.circular(16),
@@ -13717,8 +13782,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                             InkWell(
                               onTap: () {
                                 if (_tabController.index < 5) {
-                                  setState(() => _tabController
-                                      .animateTo(_tabController.index + 1));
+                                  _tabController
+                                      .animateTo(_tabController.index + 1);
                                 }
                               },
                               borderRadius: BorderRadius.circular(16),
