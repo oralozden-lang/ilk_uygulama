@@ -3558,8 +3558,12 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       if (mounted) {
         final onlineDocs =
             snap.docs.where((d) => d.data()['tip'] == 'online').toList();
-        final pulseDocs =
-            snap.docs.where((d) => d.data()['tip'] == 'pulseKalemi').toList();
+        final pulseDocs = snap.docs
+            .where((d) =>
+                d.data()['tip'] == 'pulseKalemi' &&
+                (d.data()['sistemAlani'] == null ||
+                    (d.data()['sistemAlani'] as String).isEmpty))
+            .toList();
 
         // Sırala
         onlineDocs.sort((a, b) {
@@ -3637,6 +3641,7 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                         99,
                     'dogruKaynak':
                         d.data()['dogruKaynak'] as String? ?? 'pulse',
+                    'sistemAlani': d.data()['sistemAlani'] as String? ?? '',
                   })
               .where((m) => (m['ad'] as String).isNotEmpty)
               .toList();

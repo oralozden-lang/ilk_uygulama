@@ -126,6 +126,9 @@ class OdemeYontemleriKartState extends State<OdemeYontemleriKart> {
     String tip = mevcut?['tip'] ?? 'yemekKarti';
     String dogruKaynak = mevcut?['dogruKaynak'] ?? _onerilenKaynak(tip);
     bool aktif = mevcut?['aktif'] ?? true;
+    bool rapordaGoster = (mevcut?['rapordaGoster'] as bool?) ?? true;
+    final sistemAlaniCtrl =
+        TextEditingController(text: mevcut?['sistemAlani'] ?? '');
 
     await showDialog<void>(
       context: context,
@@ -212,6 +215,18 @@ class OdemeYontemleriKartState extends State<OdemeYontemleriKart> {
                       contentPadding: EdgeInsets.zero,
                       onChanged: (v) => setDlg(() => dogruKaynak = v!),
                     )),
+                // Sistem Alanı — dogruKaynak 'program' iken göster
+                if (dogruKaynak == 'program') ...[
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: sistemAlaniCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Firestore Alan Adı (örn: bankaParasi)',
+                      helperText: 'Otomatik hesaplanan değerler için',
+                      isDense: true,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
 
                 // Aktif
@@ -221,6 +236,16 @@ class OdemeYontemleriKartState extends State<OdemeYontemleriKart> {
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   onChanged: (v) => setDlg(() => aktif = v),
+                ),
+                SwitchListTile(
+                  title: const Text('Ödeme Kanalları Raporunda Göster',
+                      style: TextStyle(fontSize: 13)),
+                  subtitle: const Text('Kapalıysa rapor listesinde çıkmaz',
+                      style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  value: rapordaGoster,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (v) => setDlg(() => rapordaGoster = v),
                 ),
               ],
             ),
@@ -242,6 +267,9 @@ class OdemeYontemleriKartState extends State<OdemeYontemleriKart> {
                   'digerEkranAdi': digerCtrl.text.trim(),
                   'sira': int.tryParse(siraCtrl.text.trim()) ?? 99,
                   'aktif': aktif,
+                  'rapordaGoster': rapordaGoster,
+                  if (sistemAlaniCtrl.text.trim().isNotEmpty)
+                    'sistemAlani': sistemAlaniCtrl.text.trim(),
                 };
                 if (mevcut != null) {
                   await FirebaseFirestore.instance
@@ -266,6 +294,7 @@ class OdemeYontemleriKartState extends State<OdemeYontemleriKart> {
     pulseCtrl.dispose();
     digerCtrl.dispose();
     siraCtrl.dispose();
+    sistemAlaniCtrl.dispose();
   }
 
   String _onerilenKaynak(String tip) {
@@ -466,7 +495,17 @@ class OdemeYontemleriKartState extends State<OdemeYontemleriKart> {
                               if (kaynakYazi.isNotEmpty)
                                 _etiket(kaynakYazi, kaynakRenk),
                               if (!aktif) _etiket('Pasif', Colors.grey),
+                              if ((item['rapordaGoster'] as bool?) == false)
+                                _etiket('Raporda Gizli', Colors.orange[700]!),
                             ]),
+                            if (item.containsKey('sistemAlani') &&
+                                (item['sistemAlani'] as String).isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text('Alan: ${item['sistemAlani']}',
+                                    style: TextStyle(
+                                        fontSize: 11, color: Colors.grey[500])),
+                              ),
                             if (pulseAdi.isNotEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(top: 2),

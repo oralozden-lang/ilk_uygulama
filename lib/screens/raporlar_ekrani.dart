@@ -1723,7 +1723,10 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
       for (final doc in snap.docs) {
         final tip = (doc.data()['tip'] as String?) ?? '';
         final aktif = (doc.data()['aktif'] as bool?) ?? true;
-        if ((tip == 'yemekKarti' || tip == 'online') && aktif) {
+        final rapordaGoster = (doc.data()['rapordaGoster'] as bool?) ?? true;
+        if ((tip == 'yemekKarti' || tip == 'online' || tip == 'pulseKalemi') &&
+            aktif &&
+            rapordaGoster) {
           final sira = (doc.data()['sira'] as num?)?.toInt() ??
               (doc.data()['pulseSira'] as num?)?.toInt() ??
               99;
@@ -1732,6 +1735,7 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
             'ad': (doc.data()['ad'] as String?) ?? doc.id,
             'tip': tip,
             'sira': sira,
+            'sistemAlani': (doc.data()['sistemAlani'] as String?) ?? '',
           });
         }
       }
@@ -1860,15 +1864,32 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
 
   double _kanalTutarTek(
       Map<String, dynamic> kayit, Map<String, dynamic> kanal) {
+    // sistemAlani varsa — Firestore alanından direkt oku (örn: bankaParasi)
+    final sistemAlani = kanal['sistemAlani'] as String?;
+    if (sistemAlani != null && sistemAlani.isNotEmpty) {
+      return _parseFirestore(kayit[sistemAlani]);
+    }
+
     final docId = kanal['docId'] as String;
     final tip = kanal['tip'] as String;
     final pulse = (kayit['pulseKiyasVerileri'] as Map?) ?? {};
-    final pulseKey = tip == 'yemekKarti' ? 'yemek_$docId' : 'online_$docId';
+    final String pulseKey;
+    if (tip == 'yemekKarti') {
+      pulseKey = 'yemek_$docId';
+    } else if (tip == 'online') {
+      pulseKey = 'online_$docId';
+    } else {
+      pulseKey = 'pulse_$docId'; // pulseKalemi
+    }
     var raw = pulse[pulseKey];
     if (raw == null) {
       final ad = kanal['ad'] as String;
-      final eskiKey = tip == 'yemekKarti' ? 'yemek_$ad' : ad;
-      raw = pulse[eskiKey];
+      if (tip == 'yemekKarti')
+        raw = pulse['yemek_$ad'];
+      else if (tip == 'online')
+        raw = pulse[ad];
+      else
+        raw = pulse[ad];
     }
     return _parseFirestore(raw);
   }
@@ -2221,81 +2242,188 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
                       height: baslikH,
                       color: const Color(0xFF0288D1),
                       padding: const EdgeInsets.only(right: 8),
-                      child: Row(
-                          children: gorunenKanallar
-                              .map((k) => Padding(
-                                    padding: const EdgeInsets.only(left: 8),
-                                    child: SizedBox(
-                                        width: colW,
-                                        child: Text(k['ad'] as String,
-                                            style: TextStyle(
-                                                color: k['tip'] == 'yemekKarti'
-                                                    ? const Color(0xFFA5D6A7)
-                                                    : const Color(0xFF90CAF9),
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11),
-                                            textAlign: TextAlign.right,
-                                            overflow: TextOverflow.ellipsis)),
-                                  ))
-                              .toList()),
+                      child: Row(children: [
+                        ...gorunenKanallar.map((k) => Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: SizedBox(
+                                  width: colW,
+                                  child: Text(k['ad'] as String,
+                                      style: TextStyle(
+                                          color: k['tip'] == 'yemekKarti'
+                                              ? const Color(0xFFA5D6A7)
+                                              : k['tip'] == 'pulseKalemi'
+                                                  ? const Color(0xFFFFCC80)
+                                                  : const Color(0xFF90CAF9),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11),
+                                      textAlign: TextAlign.right,
+                                      overflow: TextOverflow.ellipsis)),
+                            )),
+                        // Brüt Satış
+                        Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: SizedBox(
+                                width: colW,
+                                child: const Text('Brüt Satış',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11),
+                                    textAlign: TextAlign.right,
+                                    overflow: TextOverflow.ellipsis))),
+                        // Fark
+                        Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: SizedBox(
+                                width: colW,
+                                child: const Text('Fark',
+                                    style: TextStyle(
+                                        color: Color(0xFFEF9A9A),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11),
+                                    textAlign: TextAlign.right,
+                                    overflow: TextOverflow.ellipsis))),
+                      ]),
                     ),
                     // Gün satırları
                     ...sirali.asMap().entries.map((e) {
                       final idx = e.key;
                       final k = e.value;
+                      final brutSatis =
+                          ((k['gunlukSatisToplami'] as num?) ?? 0).toDouble();
+                      final kanalToplam = gorunenKanallar.fold(
+                          0.0, (s, kanal) => s + _kanalTutarTek(k, kanal));
+                      final fark = brutSatis - kanalToplam;
+                      final farkRenk = fark.abs() < 0.01
+                          ? const Color(0xFF2E7D32)
+                          : Colors.red[600]!;
                       return Container(
                         height: rowH,
                         color: idx % 2 == 0 ? Colors.grey[50] : Colors.white,
                         padding: const EdgeInsets.only(right: 8),
                         child: Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
-                            children: gorunenKanallar.map((kanal) {
-                              final val = _kanalTutarTek(k, kanal);
-                              final isYemek = kanal['tip'] == 'yemekKarti';
-                              return Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: SizedBox(
-                                    width: colW,
-                                    child: Text(val > 0 ? _fmt(val) : '—',
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            color: val > 0
-                                                ? (isYemek
-                                                    ? const Color(0xFF2E7D32)
-                                                    : const Color(0xFF1565C0))
-                                                : Colors.grey[400],
-                                            fontWeight: val > 0
-                                                ? FontWeight.w600
-                                                : FontWeight.normal),
-                                        textAlign: TextAlign.right,
-                                        overflow: TextOverflow.ellipsis)),
-                              );
-                            }).toList()),
+                            children: [
+                              ...gorunenKanallar.map((kanal) {
+                                final val = _kanalTutarTek(k, kanal);
+                                final tip = kanal['tip'] as String;
+                                final renk = tip == 'yemekKarti'
+                                    ? const Color(0xFF2E7D32)
+                                    : tip == 'pulseKalemi'
+                                        ? const Color(0xFFE65100)
+                                        : const Color(0xFF1565C0);
+                                return Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: SizedBox(
+                                      width: colW,
+                                      child: Text(val > 0 ? _fmt(val) : '—',
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: val > 0
+                                                  ? renk
+                                                  : Colors.grey[400],
+                                              fontWeight: val > 0
+                                                  ? FontWeight.w600
+                                                  : FontWeight.normal),
+                                          textAlign: TextAlign.right,
+                                          overflow: TextOverflow.ellipsis)),
+                                );
+                              }),
+                              // Brüt Satış
+                              Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: SizedBox(
+                                      width: colW,
+                                      child: Text(
+                                          brutSatis > 0 ? _fmt(brutSatis) : '—',
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: brutSatis > 0
+                                                  ? Colors.black87
+                                                  : Colors.grey[400],
+                                              fontWeight: FontWeight.bold),
+                                          textAlign: TextAlign.right,
+                                          overflow: TextOverflow.ellipsis))),
+                              // Fark
+                              Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: SizedBox(
+                                      width: colW,
+                                      child: Text(
+                                          fark.abs() < 0.01 ? '✓' : _fmt(fark),
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: farkRenk,
+                                              fontWeight: FontWeight.bold),
+                                          textAlign: TextAlign.right,
+                                          overflow: TextOverflow.ellipsis))),
+                            ]),
                       );
                     }),
                     // Toplam satırı
-                    Container(
-                      height: rowH,
-                      color: const Color(0xFF0288D1),
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: gorunenKanallar.map((k) {
-                            final t = toplamlar[k['docId']] ?? 0.0;
-                            return Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: SizedBox(
-                                    width: colW,
-                                    child: Text(t > 0 ? _fmt(t) : '—',
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            color: t > 0
-                                                ? Colors.white
-                                                : Colors.white38),
-                                        textAlign: TextAlign.right)));
-                          }).toList()),
-                    ),
+                    Builder(builder: (ctx) {
+                      final topBrut = sirali.fold(
+                          0.0,
+                          (s, k) =>
+                              s +
+                              ((k['gunlukSatisToplami'] as num?) ?? 0)
+                                  .toDouble());
+                      final topKanal = gorunenKanallar.fold(0.0,
+                          (s, kanal) => s + (toplamlar[kanal['docId']] ?? 0.0));
+                      final topFark = topBrut - topKanal;
+                      return Container(
+                        height: rowH,
+                        color: const Color(0xFF0288D1),
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              ...gorunenKanallar.map((k) {
+                                final t = toplamlar[k['docId']] ?? 0.0;
+                                return Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: SizedBox(
+                                        width: colW,
+                                        child: Text(t > 0 ? _fmt(t) : '—',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                                color: t > 0
+                                                    ? Colors.white
+                                                    : Colors.white38),
+                                            textAlign: TextAlign.right)));
+                              }),
+                              // Brüt Satış toplam
+                              Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: SizedBox(
+                                      width: colW,
+                                      child: Text(
+                                          topBrut > 0 ? _fmt(topBrut) : '—',
+                                          style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white),
+                                          textAlign: TextAlign.right))),
+                              // Fark toplam
+                              Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: SizedBox(
+                                      width: colW,
+                                      child: Text(
+                                          topFark.abs() < 0.01
+                                              ? '✓'
+                                              : _fmt(topFark),
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: topFark.abs() < 0.01
+                                                  ? const Color(0xFFA5D6A7)
+                                                  : const Color(0xFFEF9A9A)),
+                                          textAlign: TextAlign.right))),
+                            ]),
+                      );
+                    }),
                   ]),
             ),
           ),
