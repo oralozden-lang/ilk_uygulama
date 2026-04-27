@@ -152,7 +152,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   DateTime? _sonKapaliTarih; // En son kapatılan gün (gecmisGunHakki referansı)
   bool _duzenlemeAcik = false;
   int _bekleyenTransferSayisi = 0; // AppBar rozet
-  bool _bildirimIsleniyor = false; // Bildirim döngüsü yeniden tetiklenmesin
+  bool _bildirimIsleniyor = false;
+  bool _gorselSeciliyor =
+      false; // Resim seçimi sırasında lifecycle event yoksay // Bildirim döngüsü yeniden tetiklenmesin
   StreamSubscription<QuerySnapshot>? _bekleyenTransferStream; // Realtime rozet
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _transferKey = GlobalKey(); // Transfer bölümüne scroll
@@ -517,8 +519,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
       // Geri dönüldü — timerı iptal et
       _arkaPlanTimer?.cancel();
       _arkaPlanTimer = null;
-      // Düzenleme açıksa uyar
-      if (_duzenlemeAcik && mounted) {
+      // Düzenleme açıksa uyar — resim seçimi sonrası değilse
+      if (_duzenlemeAcik && mounted && !_gorselSeciliyor) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _oturumZamanAsimiDuzenleme();
         });
@@ -2639,6 +2641,154 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
     );
   }
 
+  // ── Görsel Okuma Fallback Zinciri ────────────────────────────────────────
+  // 1. Gemini 3.1 Flash Lite Preview
+  // 2. Gemini 2.5 Flash Lite
+  // 3. Groq (llama-4-scout-17b-16e-instruct)
+  // Başarılı olan ilk servisten sonuç döner, hepsi başarısızsa null döner
+  Future<String?> _gorselOkuFallback({
+    required String base64Image,
+    required String mimeType,
+    required String prompt,
+    required String geminiApiKey,
+    required String groqApiKey,
+  }) async {
+    // Gemini modelleri
+    final geminiModeller = [
+      'gemini-3.1-flash-lite-preview',
+      'gemini-2.5-flash-lite',
+    ];
+
+    for (final model in geminiModeller) {
+      try {
+        final result = await _geminiOku(
+          base64Image: base64Image,
+          mimeType: mimeType,
+          prompt: prompt,
+          apiKey: geminiApiKey,
+          model: model,
+        );
+        if (result != null) return result;
+      } catch (_) {}
+    }
+
+    // Groq fallback
+    if (groqApiKey.isNotEmpty) {
+      try {
+        final result = await _groqOku(
+          base64Image: base64Image,
+          mimeType: mimeType,
+          prompt: prompt,
+          apiKey: groqApiKey,
+        );
+        if (result != null) return result;
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  // Tek Gemini modeli ile okuma
+  Future<String?> _geminiOku({
+    required String base64Image,
+    required String mimeType,
+    required String prompt,
+    required String apiKey,
+    required String model,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse(
+              'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey',
+            ),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'contents': [
+                {
+                  'parts': [
+                    {
+                      'inline_data': {
+                        'mime_type': mimeType,
+                        'data': base64Image,
+                      }
+                    },
+                    {'text': prompt}
+                  ]
+                }
+              ],
+              'generationConfig': {'temperature': 0},
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final responseJson = jsonDecode(response.body);
+        final text = responseJson['candidates']?[0]?['content']?['parts']?[0]
+                ?['text'] as String? ??
+            '';
+        return text.isNotEmpty ? text : null;
+      }
+      // 429 veya 503 — sonraki modele geç
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Groq ile okuma — llama-4-scout vision
+  Future<String?> _groqOku({
+    required String base64Image,
+    required String mimeType,
+    required String prompt,
+    required String apiKey,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $apiKey',
+            },
+            body: jsonEncode({
+              'model': 'meta-llama/llama-4-scout-17b-16e-instruct',
+              'messages': [
+                {
+                  'role': 'user',
+                  'content': [
+                    {
+                      'type': 'image_url',
+                      'image_url': {
+                        'url': 'data:$mimeType;base64,$base64Image',
+                      },
+                    },
+                    {
+                      'type': 'text',
+                      'text': prompt,
+                    },
+                  ],
+                }
+              ],
+              'temperature': 0,
+              'max_tokens': 2048,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final responseJson = jsonDecode(response.body);
+        final text =
+            responseJson['choices']?[0]?['message']?['content'] as String? ??
+                '';
+        return text.isNotEmpty ? text : null;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _pulseResmiOku(
       {ImageSource source = ImageSource.gallery}) async {
     try {
@@ -2662,7 +2812,8 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         return;
       }
 
-      // Resim seç
+      // Resim seç — lifecycle uyarısını geçici devre dışı bırak
+      _gorselSeciliyor = true;
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: source,
@@ -2670,6 +2821,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
         maxWidth: 1200,
         maxHeight: 1600,
       );
+      _gorselSeciliyor = false;
       if (picked == null) return;
 
       // Önizleme — net mi kontrolü
@@ -2931,103 +3083,34 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         return;
       }
 
-      // Gemini API isteği — 503 olursa 1 kez retry
-      late http.Response response;
-      for (int deneme = 1; deneme <= 3; deneme++) {
-        try {
-          response = await http.post(
-            Uri.parse(
-              'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=$apiKey',
-            ),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'contents': [
-                {
-                  'parts': [
-                    {
-                      'inline_data': {
-                        'mime_type': mimeType,
-                        'data': base64Image,
-                      }
-                    },
-                    {'text': prompt}
-                  ]
-                }
-              ],
-              'generationConfig': {
-                'temperature': 0,
-              }
-            }),
-          );
-        } catch (e) {
-          setState(() => _pulseOkunuyor = false);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                  content: Text('Bağlantı hatası: $e'),
-                  backgroundColor: Colors.red),
-            );
-          }
-          return;
-        }
+      // Fallback zinciri: 3.1 → 2.5-lite → Groq
+      final groqApiKey = ayarDoc.data()?['groqApiKey'] as String? ?? '';
+      final String? responseText = await _gorselOkuFallback(
+        base64Image: base64Image,
+        mimeType: mimeType,
+        prompt: prompt,
+        geminiApiKey: apiKey,
+        groqApiKey: groqApiKey,
+      );
 
-        if (_pulseIptalEdildi) {
-          setState(() => _pulseOkunuyor = false);
-          return;
-        }
-
-        if (response.statusCode == 503 && deneme < 3) {
-          final bekleme = deneme == 1 ? 5 : 10;
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                    'Sunucu meşgul, $bekleme sn sonra tekrar deneniyor... ($deneme/3)'),
-                backgroundColor: Colors.orange,
-                duration: Duration(seconds: bekleme),
-              ),
-            );
-          }
-          await Future.delayed(Duration(seconds: bekleme));
-          continue;
-        }
-        break; // Başarılı veya son deneme
-      }
-
-      if (response.statusCode != 200) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.statusCode == 503
-                  ? 'Sunucu şu an meşgul. İptal edip manuel girebilirsiniz.'
-                  : 'API hatası: ${response.statusCode}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
-            ),
-          );
-        }
-        return;
-      }
-
-      // Yanıtı parse et
-      final responseJson = jsonDecode(response.body);
-      final text = responseJson['candidates']?[0]?['content']?['parts']?[0]
-              ?['text'] as String? ??
-          '';
-      if (text.isEmpty) {
+      if (responseText == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Resimden veri alınamadı.'),
-              backgroundColor: Colors.orange,
+              content: Text(
+                  'Tüm servisler meşgul. Lütfen tekrar deneyin veya manuel girin.'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 5),
             ),
           );
         }
+        setState(() => _pulseOkunuyor = false);
         return;
       }
 
       // JSON parse
-      final cleanText = text.replaceAll(RegExp(r'```json|```'), '').trim();
+      final cleanText =
+          responseText.replaceAll(RegExp(r'```json|```'), '').trim();
       final Map<String, dynamic> geminiOkunan = jsonDecode(cleanText);
 
       // Yanlış resim kontrolü
@@ -3227,7 +3310,8 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         return;
       }
 
-      // Resim seç
+      // Resim seç — lifecycle uyarısını geçici devre dışı bırak
+      _gorselSeciliyor = true;
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: source,
@@ -3235,6 +3319,7 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
         maxWidth: 1200,
         maxHeight: 1600,
       );
+      _gorselSeciliyor = false;
       if (picked == null) return;
 
       // Önizleme — net mi kontrolü
@@ -3366,100 +3451,34 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
         return;
       }
 
-      late http.Response response;
-      for (int deneme = 1; deneme <= 3; deneme++) {
-        try {
-          response = await http.post(
-            Uri.parse(
-              'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=$apiKey',
-            ),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'contents': [
-                {
-                  'parts': [
-                    {
-                      'inline_data': {
-                        'mime_type': mimeType,
-                        'data': base64Image,
-                      }
-                    },
-                    {'text': prompt}
-                  ]
-                }
-              ],
-              'generationConfig': {'temperature': 0},
-            }),
-          );
-        } catch (e) {
-          setState(() => _myDominosOkunuyor = false);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                  content: Text('Bağlantı hatası: $e'),
-                  backgroundColor: Colors.red),
-            );
-          }
-          return;
-        }
-
-        if (_myDomIptalEdildi) {
-          setState(() => _myDominosOkunuyor = false);
-          return;
-        }
-
-        if (response.statusCode == 503 && deneme < 3) {
-          final bekleme = deneme == 1 ? 5 : 10;
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                    'Sunucu meşgul, $bekleme sn sonra tekrar deneniyor... ($deneme/3)'),
-                backgroundColor: Colors.orange,
-                duration: Duration(seconds: bekleme),
-              ),
-            );
-          }
-          await Future.delayed(Duration(seconds: bekleme));
-          continue;
-        }
-        break;
-      }
+      // Fallback zinciri: 3.1 → 2.5-lite → Groq
+      final groqApiKey = ayarDoc.data()?['groqApiKey'] as String? ?? '';
+      final String? responseText = await _gorselOkuFallback(
+        base64Image: base64Image,
+        mimeType: mimeType,
+        prompt: prompt,
+        geminiApiKey: apiKey,
+        groqApiKey: groqApiKey,
+      );
 
       setState(() => _myDominosOkunuyor = false);
 
-      if (response.statusCode != 200) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.statusCode == 503
-                  ? 'Sunucu şu an meşgul. İptal edip manuel girebilirsiniz.'
-                  : 'API hatası: ${response.statusCode}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
-            ),
-          );
-        }
-        return;
-      }
-
-      final responseJson = jsonDecode(response.body);
-      final text = responseJson['candidates']?[0]?['content']?['parts']?[0]
-              ?['text'] as String? ??
-          '';
-      if (text.isEmpty) {
+      if (responseText == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Resimden veri alınamadı.'),
-              backgroundColor: Colors.orange,
+              content: Text(
+                  'Tüm servisler meşgul. Lütfen tekrar deneyin veya manuel girin.'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 5),
             ),
           );
         }
         return;
       }
 
-      final cleanText = text.replaceAll(RegExp(r'```json|```'), '').trim();
+      final cleanText =
+          responseText.replaceAll(RegExp(r'```json|```'), '').trim();
       final Map<String, dynamic> okunan = jsonDecode(cleanText);
 
       // Yanlış resim kontrolü
@@ -10022,7 +10041,8 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
       // 3. Ödeme Kanalları
       if (_pulseOkundu &&
           (yemeklerPdf.isNotEmpty || onlinelerPdf.isNotEmpty)) ...[
-        bolumBaslik('ÖDEME KANALLARI (Pulse)', PdfColor.fromHex('#006064')),
+        bolumBaslik('ÖDEME KANALLARI (Pulse)', PdfColor.fromHex('#006064'),
+            toplam: fmt(yemekToplamPdf + onlineToplamPdf)),
         pw.Container(
           padding: const pw.EdgeInsets.all(6),
           decoration:
@@ -10485,6 +10505,18 @@ Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                     letterSpacing: 1)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20)),
+              child: Text(_formatTL(yemekToplam + onlineToplam),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14)),
+            ),
           ]),
         ),
         Padding(

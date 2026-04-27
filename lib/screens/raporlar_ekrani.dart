@@ -1487,6 +1487,8 @@ class RaporlarWidgetState extends State<RaporlarWidget>
       final tarih = k['tarihGoster'] ?? k['tarih'] ?? '';
       final subeAd = _subeAdlari[k['_subeId']] ?? '';
 
+      final tarihRaw = k['tarih'] as String? ?? '';
+      final subeId = k['_subeId'] as String? ?? '';
       void ekle(String kaynak, String aciklama, double tutar) {
         final aciklamaLower = aciklama.toLowerCase();
         final turEslesi = _aramaGiderTuru == null ||
@@ -1495,10 +1497,12 @@ class RaporlarWidgetState extends State<RaporlarWidget>
         if (turEslesi && metinEslesi && tutar > 0) {
           sonuclar.add({
             'tarih': tarih,
+            'tarihRaw': tarihRaw,
+            'subeId': subeId,
             'sube': subeAd,
             'kaynak': kaynak,
             'aciklama': aciklama,
-            'tutar': tutar
+            'tutar': tutar,
           });
         }
       }
@@ -1575,7 +1579,28 @@ class RaporlarWidgetState extends State<RaporlarWidget>
           ),
         ),
         const SizedBox(height: 8),
-        ...sonuclar.map((r) => Container(
+        ...sonuclar.map((r) => GestureDetector(
+            onTap: () {
+              final tarihRaw = r['tarihRaw'] as String? ?? '';
+              final subeId = r['subeId'] as String? ?? '';
+              if (tarihRaw.isEmpty || subeId.isEmpty) return;
+              final parts = tarihRaw.split('-');
+              if (parts.length != 3) return;
+              final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]),
+                  int.parse(parts[2]));
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OnHazirlikEkrani(
+                      subeKodu: subeId,
+                      subeler: widget.subeler,
+                      baslangicTarihi: dt,
+                      gecmisGunHakki: -1,
+                      initialTabIndex: 5, // Özet & Kapat
+                    ),
+                  ));
+            },
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               margin: const EdgeInsets.only(bottom: 4),
               decoration: BoxDecoration(
@@ -1630,8 +1655,10 @@ class RaporlarWidgetState extends State<RaporlarWidget>
                 Text(_fmt(r['tutar'] as double),
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right, size: 14, color: Colors.grey[400]),
               ]),
-            )),
+            ))),
       ],
     );
   }
