@@ -1,4 +1,4 @@
-import 'ozet_ekrani.dart';
+import 'on_hazirlik_ekrani.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -89,8 +89,11 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
           final tarihStr = d['tarih'] as String? ?? '';
           final p = tarihStr.split('-');
           if (p.length == 3) {
-            sonKapali =
-                DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+            sonKapali = DateTime(
+              int.parse(p[0]),
+              int.parse(p[1]),
+              int.parse(p[2]),
+            );
           }
           break;
         }
@@ -610,8 +613,9 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                             Flexible(
                                               child: Wrap(
                                                 spacing: 3,
-                                                children:
-                                                    dovizKasaOzet.map((d) {
+                                                children: dovizKasaOzet.map((
+                                                  d,
+                                                ) {
                                                   final c = d['cins'] as String;
                                                   final sem = c == 'USD'
                                                       ? r'$'
@@ -625,10 +629,11 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                                   return Text(
                                                     '$sem${_binAyracSade(m)}',
                                                     style: TextStyle(
-                                                        fontSize: 10,
-                                                        color: dovizRenk(c),
-                                                        fontWeight:
-                                                            FontWeight.w600),
+                                                      fontSize: 10,
+                                                      color: dovizRenk(c),
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
                                                   );
                                                 }).toList(),
                                               ),
@@ -697,9 +702,10 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                             return Text(
                                               '$sem${_binAyracSade(m)}',
                                               style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: dovizRenk(c),
-                                                  fontWeight: FontWeight.w600),
+                                                fontSize: 11,
+                                                color: dovizRenk(c),
+                                                fontWeight: FontWeight.w600,
+                                              ),
                                             );
                                           }).toList(),
                                         ),
@@ -759,15 +765,17 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                                     final chip = Text(
                                                       '$sem${_binAyracSade(m)}',
                                                       style: TextStyle(
-                                                          fontSize: 10,
-                                                          color: dovizRenk(c),
-                                                          fontWeight:
-                                                              FontWeight.w600),
+                                                        fontSize: 10,
+                                                        color: dovizRenk(c),
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
                                                     );
                                                     return aciklamaG.isNotEmpty
                                                         ? Tooltip(
                                                             message: aciklamaG,
-                                                            child: chip)
+                                                            child: chip,
+                                                          )
                                                         : chip;
                                                   }).toList(),
                                                 ),
@@ -845,10 +853,11 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                                                   return Text(
                                                     '$sem${_binAyracSade(m)}',
                                                     style: TextStyle(
-                                                        fontSize: 10,
-                                                        color: dovizRenk(c),
-                                                        fontWeight:
-                                                            FontWeight.w600),
+                                                      fontSize: 10,
+                                                      color: dovizRenk(c),
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
                                                   );
                                                 }).toList(),
                                               ),
@@ -913,11 +922,12 @@ class _GecmisKayitlarEkraniState extends State<GecmisKayitlarEkrani> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => OzetEkrani(
+                              builder: (_) => OnHazirlikEkrani(
                                 subeKodu: _aktifSubeKodu,
                                 baslangicTarihi: tarihDt,
                                 subeler: widget.subeler,
                                 gecmisGunHakki: widget.gecmisGunHakki,
+                                initialTabIndex: 5,
                               ),
                             ),
                           );

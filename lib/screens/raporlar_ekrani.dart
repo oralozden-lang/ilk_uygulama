@@ -1516,6 +1516,20 @@ class RaporlarWidgetState extends State<RaporlarWidget>
       for (final h in (k['nakitCikislar'] as List?)?.cast<Map>() ?? [])
         ekle('Nakit Çıkış', (h['aciklama'] ?? '').toString(),
             (h['tutar'] as num? ?? 0).toDouble());
+      for (final h in (k['nakitDovizler'] as List?)?.cast<Map>() ?? []) {
+        final aciklama = (h['aciklama'] ?? '').toString().trim();
+        final cins = (h['cins'] ?? '').toString();
+        final sembol = cins == 'USD'
+            ? r'$'
+            : cins == 'EUR'
+                ? '€'
+                : cins == 'GBP'
+                    ? '£'
+                    : cins;
+        if (aciklama.isNotEmpty)
+          ekle('Nakit Çıkış ($sembol)', aciklama,
+              (h['miktar'] as num? ?? 0).toDouble());
+      }
       for (final h in (k['digerAlimlar'] as List?)?.cast<Map>() ?? [])
         ekle('Diğer Alım', (h['aciklama'] ?? '').toString(),
             (h['tutar'] as num? ?? 0).toDouble());
