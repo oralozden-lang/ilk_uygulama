@@ -2655,7 +2655,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   }) async {
     // Gemini modelleri
     final geminiModeller = [
-      'gemini-2.5-flash-lite', // stabil, tutarlı
+      'gemini-2.5-flash', // stabil, tutarlı
       'gemini-3.1-flash-lite-preview', // preview, yüksek limit
     ];
 
@@ -3498,9 +3498,11 @@ Sayı formatında virgülü noktaya çevir. Alan bulunamazsa null yaz.""";
 2. Resim gerçekten My Dominos uygulaması/sitesinden bir sipariş/satış raporu mu? My Dominos ekranında genellikle sipariş listesi, ödeme yöntemi ve tutar bilgileri bulunur. Pulse POS, kasa programı veya başka bir uygulama ekranı ise döndür: {"hata": "Bu resim My Dominos ekranı değil"}
 
 My Dominos ekranıysa:
-Sadece "Online Kredi" veya "Banka Kartı" içeren satırların Ciro değerlerini al.
-Nakit, Metropol Kart, Pluxee gibi yemek kartı satırlarını alma.
+Tablodaki TÜM satırları oku. Her satırda Ödeme Tipi ve Ciro sütunları var.
+Aynı Ödeme tipi birden fazla satırda geçiyorsa Ciro değerlerini TOPLA.
+Nakit içeren satırları ALMA.
 
+Emin olmadığın karakterleri en yakın Türkçe kelimeye göre düzelt (örn: "Cuzdan" → "Cüzdan", "Kredt Kart" → "Kredi Kartı"),
 Ekranda bu adlardan birini gördüğünde listeye ekle: $kanallar
 "ad" alanına ekranda GÖRDÜĞÜN adı AYNEN yaz, değiştirme.
 
