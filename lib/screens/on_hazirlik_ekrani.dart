@@ -3989,26 +3989,22 @@ Sadece JSON: {"poslar": [4595.00, 3193.00]}""";
       // ÖNEMLİ: Gemini ekranda GÖRDÜĞÜ ham adı döndürür, sistem adını değil.
       // Eşleştirme myDomFuzzyBul ile kodda yapılır — ad değişikliği okumayı etkilemez.
       final prompt = """Bu bir My Dominos sipariş dökümü ekran görüntüsü.
-ÖNCE iki kontrol yap:
-1. Resim yeterince net mi? Yazılar okunabiliyor mu? Net değilse döndür: {"hata": "Resim bulanık veya okunamıyor, daha yakın ve sabit tutarak tekrar çekin"}
-2. Resim gerçekten My Dominos uygulaması/sitesinden bir sipariş/satış raporu mu? My Dominos ekranında genellikle sipariş listesi, ödeme yöntemi ve tutar bilgileri bulunur. Pulse POS, kasa programı veya başka bir uygulama ekranı ise döndür: {"hata": "Bu resim My Dominos ekranı değil"}
+
+ÖNCE kontrol et:
+1. Net değilse: {"hata": "Resim bulanık veya okunamıyor"}
+2. My Dominos değilse: {"hata": "Bu resim My Dominos ekranı değil"}
 
 My Dominos ekranıysa:
-Tablodaki TÜM satırları oku. Her satırda Ödeme Tipi ve Ciro sütunları var.
-Her satırı yatay çizgi sınırları içinde oku — Ödeme Tipi ile Ciro mutlaka aynı satırda olmalı, üst veya alt satırla karıştırma.
-Ciro sütunundaki TL yazısını tutar olarak alma, sadece sayıyı al.
-Sipariş Sayısı sütunundaki küçük sayıları Ciro ile karıştırma — Ciro genellikle çok daha büyük bir sayıdır.
-Ciro sütunu tablonun en sağındaki sayı sütunudur. Başlık görünmese bile en sağdaki büyük sayıları Ciro olarak al.
-Nakit içeren satırları ALMA.
+- Her satırı yatay oku. Ödeme Tipi ile Ciro AYNI satırda olmalı, karıştırma.
+- Ciro o satırın en sağındaki büyük TL tutarıdır. TL yazısını ve küçük sayıları (sipariş adedi) Ciro olarak alma.
+- Nakit içeren satırları ALMA.
+- Ekranda bu ödeme tiplerinden birini gördüğünde listeye ekle: $kanallar
+- "ad" alanına ekranda GÖRDÜĞÜN adı AYNEN yaz, değiştirme.
+- Emin olmadığın karakterleri Türkçeye göre düzelt (örn: "Cuzdan" → "Cüzdan").
 
-Emin olmadığın karakterleri en yakın Türkçe kelimeye göre düzelt (örn: "Cuzdan" → "Cüzdan", "Kredt Kart" → "Kredi Kartı"),
-Ekranda bu adlardan birini gördüğünde listeye ekle: $kanallar
-"ad" alanına ekranda GÖRDÜĞÜN adı AYNEN yaz, değiştirme.
-
-Aşağıdaki JSON formatında döndür:
+Sadece JSON döndür:
 {"online": [{"ad": "EKRANDAKI_AD", "tutar": 1234.56}]}
 
-Sadece JSON döndür, başka açıklama yazma.
 Sayılarda virgülü noktaya çevir. Kanal bulunamazsa listeye ekleme.""";
 
       // İptal kontrolü
