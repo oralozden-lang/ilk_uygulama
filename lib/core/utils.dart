@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 // Uygulama versiyonu
-const String appVersiyon = 'v1.2.0';
+const String appVersiyon = 'V2.0.0';
 
 // Gün kapanış saati — ayarlar'dan yüklenir, varsayılan 5
 int gunKapanisSaati = 5;
