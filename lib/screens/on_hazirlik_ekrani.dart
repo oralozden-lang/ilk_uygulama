@@ -3995,6 +3995,10 @@ Sadece JSON: {"poslar": [4595.00, 3193.00]}""";
 
 My Dominos ekranıysa:
 Tablodaki TÜM satırları oku. Her satırda Ödeme Tipi ve Ciro sütunları var.
+Her satırı yatay çizgi sınırları içinde oku — Ödeme Tipi ile Ciro mutlaka aynı satırda olmalı, üst veya alt satırla karıştırma.
+Ciro sütunundaki TL yazısını tutar olarak alma, sadece sayıyı al.
+Sipariş Sayısı sütunundaki küçük sayıları Ciro ile karıştırma — Ciro genellikle çok daha büyük bir sayıdır.
+Ciro sütunu tablonun en sağındaki sayı sütunudur. Başlık görünmese bile en sağdaki büyük sayıları Ciro olarak al.
 Nakit içeren satırları ALMA.
 
 Emin olmadığın karakterleri en yakın Türkçe kelimeye göre düzelt (örn: "Cuzdan" → "Cüzdan", "Kredt Kart" → "Kredi Kartı"),
