@@ -3990,7 +3990,6 @@ Sadece JSON: {"poslar": [4595.00, 3193.00]}""";
 
 My Dominos ekranıysa:
 Tablodaki TÜM satırları oku. Her satırda Ödeme Tipi ve Ciro sütunları var.
-Aynı Ödeme tipi birden fazla satırda geçiyorsa Ciro değerlerini TOPLA.
 Nakit içeren satırları ALMA.
 
 Emin olmadığın karakterleri en yakın Türkçe kelimeye göre düzelt (örn: "Cuzdan" → "Cüzdan", "Kredt Kart" → "Kredi Kartı"),
