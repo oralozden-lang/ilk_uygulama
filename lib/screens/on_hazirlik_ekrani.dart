@@ -2914,6 +2914,7 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
   }) async {
     // Gemini modelleri
     final geminiModeller = [
+      'gemini-2.5-flash,'
       'gemini-3.1-flash-lite-preview', // hızlı, önce dene
       'gemini-2.5-flash', // güçlü, yedek
     ];
