@@ -3227,7 +3227,12 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
                 }
               }
             }
-            final oran = skor / (arananTokenlar.length * 3);
+            // Kısa tanım: tanımlı adın tüm tokenları eşleştiyse kabul et
+            final minToken = arananTokenlar.length < digerTokenlar.length
+                ? arananTokenlar.length
+                : digerTokenlar.length;
+            final maxSkor = minToken * 3;
+            final oran = maxSkor > 0 ? skor / maxSkor : 0;
             if (oran >= 0.6 && skor > enIyiSkor) {
               enIyiSkor = skor;
               enIyi = e;
