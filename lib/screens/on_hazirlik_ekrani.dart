@@ -3228,9 +3228,9 @@ class _OnHazirlikEkraniState extends State<OnHazirlikEkrani>
               }
             }
             // Kısa tanım: tanımlı adın tüm tokenları eşleştiyse kabul et
-            final minToken = arananTokenlar.length < digerTokenlar.length
+            final minToken = arananTokenlar.length < pulseTokenlar.length
                 ? arananTokenlar.length
-                : digerTokenlar.length;
+                : pulseTokenlar.length;
             final maxSkor = minToken * 3;
             final oran = maxSkor > 0 ? skor / maxSkor : 0;
             if (oran >= 0.6 && skor > enIyiSkor) {
@@ -3963,7 +3963,11 @@ Sadece JSON: {"poslar": [4595.00, 3193.00]}""";
                 }
               }
             }
-            final oran = skor / (arananTokenlar.length * 3);
+            final minToken = arananTokenlar.length < digerTokenlar.length
+                ? arananTokenlar.length
+                : digerTokenlar.length;
+            final maxSkor = minToken * 3;
+            final oran = maxSkor > 0 ? skor / maxSkor : 0;
             if (oran >= 0.6 && skor > enIyiSkor) {
               enIyiSkor = skor;
               enIyi = e;
