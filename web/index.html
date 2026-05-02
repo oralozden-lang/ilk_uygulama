@@ -97,6 +97,16 @@
       }
     };
   </script>
+  <script>
+    // Service worker devre dışı — her açılışta güncel versiyon yüklensin
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for (let registration of registrations) {
+          registration.unregister();
+        }
+      });
+    }
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
