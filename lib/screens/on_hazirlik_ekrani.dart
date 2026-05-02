@@ -3911,7 +3911,9 @@ Sadece JSON: {"poslar": [4595.00, 3193.00]}""";
 
       // MyDominos fuzzy eşleştirme — Pulse fuzzyBul ile aynı mantık
       Map<String, dynamic>? myDomFuzzyBul(String geminiAd) {
-        final aranan = geminiAd.toUpperCase().trim();
+        // Boşuksuz tireleri normalize et: "OLO-Garanti" → "OLO - Garanti"
+        final normalize = geminiAd.replaceAll(RegExp(r'(?<! )-(?! )'), ' - ');
+        final aranan = normalize.toUpperCase().trim();
         // 1. Tam eşleşme
         for (final e in myDomEslestirme) {
           if (e['digerAdi'] == aranan) return e;
