@@ -45,8 +45,7 @@ jobs:
       - run: flutter pub get
       - run: flutter build web --release
       - run: npm install -g firebase-tools
-      - run: firebase hosting:channel:deploy dev --expires 30d --project ${{ secrets.FIREBASE_PROJECT_ID }}
-        - run: |
-                  echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service_account.json
-                            export GOOGLE_APPLICATION_CREDENTIALS=service_account.json
-                                      firebase hosting:channel:deploy dev --expires 30d --project ${{ secrets.FIREBASE_PROJECT_ID }}
+      - run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service_account.json
+          export GOOGLE_APPLICATION_CREDENTIALS=service_account.json
+          firebase hosting:channel:deploy dev --expires 30d --project ${{ secrets.FIREBASE_PROJECT_ID }}
