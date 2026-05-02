@@ -3918,34 +3918,17 @@ Sadece JSON: {"poslar": [4595.00, 3193.00]}""";
         for (final e in myDomEslestirme) {
           if (e['digerAdi'] == aranan) return e;
         }
-        // 2. Aranan, tanımlı adı içeriyor mu (tam)
+        // 2. Aranan tanımlı adı içeriyor mu
         for (final e in myDomEslestirme) {
           final digerAdi = (e['digerAdi'] as String? ?? '');
-          if (digerAdi.isNotEmpty && aranan == digerAdi) return e;
+          if (digerAdi.isNotEmpty && aranan.contains(digerAdi)) return e;
         }
-        // 3. Son kelime kontrolü ile içerme
-        // Ayırt edici son kelimeyi karşılaştır — farklıysa reddet
-        final arananSonKelime = aranan.split(' ').where((t) => t.length >= 3).toList();
-        final arananSon = arananSonKelime.isNotEmpty ? arananSonKelime.last : '';
+        // 3. Tanımlı ad aramayı içeriyor mu
         for (final e in myDomEslestirme) {
           final digerAdi = (e['digerAdi'] as String? ?? '');
-          if (digerAdi.isEmpty) continue;
-          if (aranan.contains(digerAdi) || digerAdi.contains(aranan)) {
-            // Son kelime kontrolü — farklı banka/kurum adları karışmasın
-            if (arananSon.isNotEmpty) {
-              final digerSonKelime = digerAdi.split(' ').where((t) => t.length >= 3).toList();
-              final digerSon = digerSonKelime.isNotEmpty ? digerSonKelime.last : '';
-              // Her iki son kelime de anlamlıysa ve tamamen farklıysa reddet
-              if (digerSon.isNotEmpty && arananSon != digerSon &&
-                  !arananSon.startsWith(digerSon.substring(0, digerSon.length > 3 ? 3 : digerSon.length)) &&
-                  !digerSon.startsWith(arananSon.substring(0, arananSon.length > 3 ? 3 : arananSon.length))) {
-                continue; // Son kelimeler farklı — bu eşleşmeyi reddet
-              }
-            }
-            return e;
-          }
+          if (digerAdi.isNotEmpty && digerAdi.contains(aranan)) return e;
         }
-        // 4. Token bazlı — son kelimeye ekstra ağırlık ver
+        // 4. Token bazlı
         final arananTokenlar =
             aranan.split(' ').where((t) => t.length >= 2).toList();
         if (arananTokenlar.isNotEmpty) {
@@ -3956,25 +3939,7 @@ Sadece JSON: {"poslar": [4595.00, 3193.00]}""";
                 .split(' ')
                 .where((t) => t.length >= 2)
                 .toList();
-            // Son kelime farklıysa bu adayı atla
-            if (arananSon.isNotEmpty && digerTokenlar.isNotEmpty) {
-              final digerSon = digerTokenlar.last.toUpperCase();
-              if (digerSon.length >= 3 && arananSon.length >= 3 &&
-                  digerSon.substring(0, 3) != arananSon.substring(0, 3)) {
-                continue; // Son kelimeler farklı — atla
-              }
-            }
             int skor = 0;
-            // Son kelimeye ekstra ağırlık — MyDominos'ta ayırt edici olan son kelimedir
-            final arananSonT = arananTokenlar.isNotEmpty ? arananTokenlar.last : '';
-            final digerSonT = digerTokenlar.isNotEmpty ? digerTokenlar.last : '';
-            // Son kelimeler eşleşiyorsa +6 bonus
-            if (arananSonT.isNotEmpty && digerSonT.isNotEmpty) {
-              if (arananSonT == digerSonT) skor += 6;
-              else if (arananSonT.startsWith(digerSonT.substring(0, digerSonT.length > 3 ? 3 : digerSonT.length)) ||
-                       digerSonT.startsWith(arananSonT.substring(0, arananSonT.length > 3 ? 3 : arananSonT.length))) skor += 3;
-              else skor -= 4; // Son kelimeler farklı — ceza ver
-            }
             for (final at in arananTokenlar) {
               for (final dt in digerTokenlar) {
                 if (at == dt) {
