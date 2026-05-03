@@ -79,6 +79,7 @@ class RaporlarWidgetState extends State<RaporlarWidget>
   DateTime _baslangic = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _bitis = DateTime.now();
   Set<String> _secilenSubeler = {};
+  bool _subeSecimAcik = false;
 
   bool _karsilastirmaAcik = false;
   int _karsilastirmaYil = DateTime.now().year;
@@ -1223,38 +1224,73 @@ class RaporlarWidgetState extends State<RaporlarWidget>
                   ],
                   if (tumSubeler.length > 1) ...[
                     const SizedBox(height: 12),
-                    const Text('Şube',
-                        style: TextStyle(fontSize: 12, color: Colors.black54)),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        FilterChip(
-                          label: const Text('Tümü'),
-                          selected: _secilenSubeler.isEmpty,
-                          onSelected: (_) =>
-                              setState(() => _secilenSubeler.clear()),
-                          selectedColor:
-                              const Color(0xFF0288D1).withOpacity(0.18),
-                          checkmarkColor: const Color(0xFF0288D1),
+                    GestureDetector(
+                      onTap: () =>
+                          setState(() => _subeSecimAcik = !_subeSecimAcik),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.black38),
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                        ...tumSubeler.map((s) => FilterChip(
-                              label: Text(_subeAdlari[s] ?? s),
-                              selected: _secilenSubeler.contains(s),
-                              onSelected: (secildi) => setState(() {
-                                if (secildi) {
-                                  _secilenSubeler.add(s);
-                                } else {
-                                  _secilenSubeler.remove(s);
-                                }
-                              }),
-                              selectedColor:
-                                  const Color(0xFF0288D1).withOpacity(0.18),
-                              checkmarkColor: const Color(0xFF0288D1),
-                            )),
-                      ],
+                        child: Row(children: [
+                          const Text('Şube',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.black54)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _secilenSubeler.isEmpty
+                                  ? 'Tümü'
+                                  : _secilenSubeler
+                                      .map((s) => _subeAdlari[s] ?? s)
+                                      .join(', '),
+                              style: const TextStyle(fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Icon(
+                              _subeSecimAcik
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              size: 18,
+                              color: Colors.black54),
+                        ]),
+                      ),
                     ),
+                    if (_subeSecimAcik) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          FilterChip(
+                            label: const Text('Tümü'),
+                            selected: _secilenSubeler.isEmpty,
+                            onSelected: (_) =>
+                                setState(() => _secilenSubeler.clear()),
+                            selectedColor:
+                                const Color(0xFF0288D1).withOpacity(0.18),
+                            checkmarkColor: const Color(0xFF0288D1),
+                          ),
+                          ...tumSubeler.map((s) => FilterChip(
+                                label: Text(_subeAdlari[s] ?? s),
+                                selected: _secilenSubeler.contains(s),
+                                onSelected: (secildi) => setState(() {
+                                  if (secildi) {
+                                    _secilenSubeler.add(s);
+                                  } else {
+                                    _secilenSubeler.remove(s);
+                                  }
+                                }),
+                                selectedColor:
+                                    const Color(0xFF0288D1).withOpacity(0.18),
+                                checkmarkColor: const Color(0xFF0288D1),
+                              )),
+                        ],
+                      ),
+                    ],
                   ],
                   const SizedBox(height: 8),
                   SwitchListTile(
@@ -1731,7 +1767,9 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
     0,
   );
   bool _siralamaArtan = false;
-  String? _secilenKanalDocId;
+  Set<String> _secilenKanalDocIds = {}; // boş = Tüm Yöntemler
+  bool _subeSecimAcik = false;
+  bool _kanalSecimAcik = false;
 
   bool _yukleniyor = false;
   Map<String, String> _subeAdlari = {};
@@ -1801,7 +1839,7 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
       if (mounted) {
         setState(() {
           _kanallar = liste;
-          // _secilenKanalDocId null kalır = Tüm Yöntemler
+          // _secilenKanalDocIds boş kalır = Tüm Yöntemler
         });
       }
     } catch (_) {}
@@ -1952,14 +1990,13 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
     return _parseFirestore(raw);
   }
 
-  double _kanalTutar(Map<String, dynamic> kayit, String? docId) {
-    if (docId == null) {
+  double _kanalTutar(Map<String, dynamic> kayit, Set<String> docIds) {
+    if (docIds.isEmpty) {
       return _kanallar.fold(0.0, (s, k) => s + _kanalTutarTek(kayit, k));
     }
-    final kanal =
-        _kanallar.firstWhere((k) => k['docId'] == docId, orElse: () => {});
-    if (kanal.isEmpty) return 0.0;
-    return _kanalTutarTek(kayit, kanal);
+    return _kanallar
+        .where((k) => docIds.contains(k['docId'] as String))
+        .fold(0.0, (s, k) => s + _kanalTutarTek(kayit, k));
   }
 
   String _fmt(double v) {
@@ -1991,9 +2028,13 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
     List<Map<String, dynamic>> kayitlar,
     String baslik,
     Color renk,
-    String? docId,
+    Set<String> docIds,
   ) {
     if (kayitlar.isEmpty) return const SizedBox.shrink();
+    // Gösterilecek kanallar
+    final gorunenKanallar = docIds.isEmpty
+        ? _kanallar
+        : _kanallar.where((k) => docIds.contains(k['docId'] as String)).toList();
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -2029,45 +2070,37 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
         Padding(
           padding: const EdgeInsets.all(14),
           child: Column(children: [
-            if (docId == null) ...[
-              // Tüm yöntemler — her kanal ayrı satır
-              ..._kanallar.map((kanal) {
-                final toplam =
-                    kayitlar.fold(0.0, (s, k) => s + _kanalTutarTek(k, kanal));
-                if (toplam <= 0) return const SizedBox.shrink();
-                final isYemek = kanal['tip'] == 'yemekKarti';
-                return _satirOzet(
-                  kanal['ad'] as String,
-                  toplam,
-                  isYemek ? const Color(0xFF2E7D32) : const Color(0xFF1565C0),
-                );
-              }),
-              const Divider(),
-              _satirOzet('Toplam',
-                  kayitlar.fold(0.0, (s, k) => s + _kanalTutar(k, null)), renk),
-            ] else ...[
-              // Tek kanal
-              _satirOzet(
-                _kanallar.firstWhere((k) => k['docId'] == docId,
-                    orElse: () => {'ad': 'Toplam'})['ad'] as String,
-                kayitlar.fold(0.0, (s, k) => s + _kanalTutar(k, docId)),
-                renk,
-              ),
-            ],
+            ...gorunenKanallar.map((kanal) {
+              final toplam =
+                  kayitlar.fold(0.0, (s, k) => s + _kanalTutarTek(k, kanal));
+              if (toplam <= 0) return const SizedBox.shrink();
+              final isYemek = kanal['tip'] == 'yemekKarti';
+              return _satirOzet(
+                kanal['ad'] as String,
+                toplam,
+                isYemek ? const Color(0xFF2E7D32) : const Color(0xFF1565C0),
+              );
+            }),
+            const Divider(),
+            _satirOzet(
+                'Toplam',
+                kayitlar.fold(0.0, (s, k) => s + _kanalTutar(k, docIds)),
+                renk),
           ]),
         ),
       ]),
     );
   }
 
-  Widget _detayTablo(List<Map<String, dynamic>> kayitlar, String? docId) {
+  Widget _detayTablo(List<Map<String, dynamic>> kayitlar, Set<String> docIds) {
     if (kayitlar.isEmpty) return const SizedBox.shrink();
+    // Sıralama burada yapılıyor — build'den ham liste gelir
     final sirali = _siralamaArtan ? kayitlar : kayitlar.reversed.toList();
 
     // Gösterilecek kanallar
-    final gorunenKanallar = docId == null
+    final gorunenKanallar = docIds.isEmpty
         ? _kanallar
-        : _kanallar.where((k) => k['docId'] == docId).toList();
+        : _kanallar.where((k) => docIds.contains(k['docId'] as String)).toList();
 
     // Tek kanal → basit liste, çok kanal → yatay kaydırmalı tablo
     if (gorunenKanallar.length == 1) {
@@ -2493,7 +2526,7 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final docId = _secilenKanalDocId;
+    final docIds = _secilenKanalDocIds;
     final baslikAna = _filtreModu == 'ay'
         ? '${_aylar[_secilenAy - 1]} $_secilenYil'
         : 'Seçili Dönem';
@@ -2586,8 +2619,117 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
               ],
               if (_aktifSubeler.length > 1) ...[
                 const SizedBox(height: 12),
-                const Text('Şube',
-                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                // ── Şube seçici ──────────────────────────────────────────
+                GestureDetector(
+                  onTap: () =>
+                      setState(() => _subeSecimAcik = !_subeSecimAcik),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.black38),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(children: [
+                      const Text('Şube',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.black54)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _secilenSubeler.isEmpty
+                              ? 'Tümü'
+                              : _secilenSubeler
+                                  .map((s) => _subeAdlari[s] ?? s)
+                                  .join(', '),
+                          style: const TextStyle(fontSize: 13),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Icon(
+                          _subeSecimAcik
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                          size: 18,
+                          color: Colors.black54),
+                    ]),
+                  ),
+                ),
+                if (_subeSecimAcik) ...[
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      FilterChip(
+                        label: const Text('Tümü'),
+                        selected: _secilenSubeler.isEmpty,
+                        onSelected: (_) =>
+                            setState(() => _secilenSubeler.clear()),
+                        selectedColor:
+                            const Color(0xFF0288D1).withOpacity(0.18),
+                        checkmarkColor: const Color(0xFF0288D1),
+                      ),
+                      ..._aktifSubeler.map((s) => FilterChip(
+                            label: Text(_subeAdlari[s] ?? s),
+                            selected: _secilenSubeler.contains(s),
+                            onSelected: (secildi) => setState(() {
+                              if (secildi) {
+                                _secilenSubeler.add(s);
+                              } else {
+                                _secilenSubeler.remove(s);
+                              }
+                            }),
+                            selectedColor:
+                                const Color(0xFF0288D1).withOpacity(0.18),
+                            checkmarkColor: const Color(0xFF0288D1),
+                          )),
+                    ],
+                  ),
+                ],
+              ],
+              const SizedBox(height: 12),
+              // ── Ödeme Yöntemi seçici ─────────────────────────────────
+              GestureDetector(
+                onTap: () =>
+                    setState(() => _kanalSecimAcik = !_kanalSecimAcik),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.black38),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(children: [
+                    const Text('Ödeme Yöntemi',
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _secilenKanalDocIds.isEmpty
+                            ? 'Tümü'
+                            : _secilenKanalDocIds
+                                .map((id) =>
+                                    _kanallar.firstWhere(
+                                        (k) => k['docId'] == id,
+                                        orElse: () =>
+                                            {'ad': id})['ad'] as String)
+                                .join(', '),
+                        style: const TextStyle(fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Icon(
+                        _kanalSecimAcik
+                            ? Icons.expand_less
+                            : Icons.expand_more,
+                        size: 18,
+                        color: Colors.black54),
+                  ]),
+                ),
+              ),
+              if (_kanalSecimAcik) ...[
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
@@ -2595,21 +2737,22 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
                   children: [
                     FilterChip(
                       label: const Text('Tümü'),
-                      selected: _secilenSubeler.isEmpty,
+                      selected: _secilenKanalDocIds.isEmpty,
                       onSelected: (_) =>
-                          setState(() => _secilenSubeler.clear()),
+                          setState(() => _secilenKanalDocIds.clear()),
                       selectedColor:
                           const Color(0xFF0288D1).withOpacity(0.18),
                       checkmarkColor: const Color(0xFF0288D1),
                     ),
-                    ..._aktifSubeler.map((s) => FilterChip(
-                          label: Text(_subeAdlari[s] ?? s),
-                          selected: _secilenSubeler.contains(s),
+                    ..._kanallar.map((k) => FilterChip(
+                          label: Text(k['ad'] as String),
+                          selected: _secilenKanalDocIds
+                              .contains(k['docId'] as String),
                           onSelected: (secildi) => setState(() {
                             if (secildi) {
-                              _secilenSubeler.add(s);
+                              _secilenKanalDocIds.add(k['docId'] as String);
                             } else {
-                              _secilenSubeler.remove(s);
+                              _secilenKanalDocIds.remove(k['docId'] as String);
                             }
                           }),
                           selectedColor:
@@ -2619,23 +2762,6 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
                   ],
                 ),
               ],
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String?>(
-                value: _secilenKanalDocId,
-                decoration: const InputDecoration(
-                    labelText: 'Ödeme Yöntemi',
-                    border: OutlineInputBorder(),
-                    isDense: true),
-                items: [
-                  const DropdownMenuItem<String?>(
-                      value: null, child: Text('Tüm Yöntemler')),
-                  ..._kanallar.map((k) => DropdownMenuItem<String?>(
-                        value: k['docId'] as String,
-                        child: Text(k['ad'] as String),
-                      )),
-                ],
-                onChanged: (v) => setState(() => _secilenKanalDocId = v),
-              ),
               const SizedBox(height: 8),
               SwitchListTile(
                 dense: true,
@@ -2733,14 +2859,14 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Expanded(
                   child: _ozetKart(_karsilastirmaKayitlar, baslikKars,
-                      Colors.blueGrey[600]!, docId)),
+                      Colors.blueGrey[600]!, docIds)),
               const SizedBox(width: 8),
               Expanded(
                   child: _ozetKart(
-                      _kayitlar, baslikAna, const Color(0xFF0288D1), docId)),
+                      _kayitlar, baslikAna, const Color(0xFF0288D1), docIds)),
             ])
           else
-            _ozetKart(_kayitlar, baslikAna, const Color(0xFF0288D1), docId),
+            _ozetKart(_kayitlar, baslikAna, const Color(0xFF0288D1), docIds),
           const SizedBox(height: 8),
           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
             Text(_siralamaArtan ? 'Eskiden Yeniye' : 'Yeniden Eskiye',
@@ -2757,15 +2883,10 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
             ),
           ]),
           if (_karsilastirmaAcik && _karsilastirmaKayitlar.isNotEmpty) ...[
-            _detayTablo(
-                _siralamaArtan
-                    ? _karsilastirmaKayitlar
-                    : _karsilastirmaKayitlar.reversed.toList(),
-                docId),
+            _detayTablo(_karsilastirmaKayitlar, docIds),
             const SizedBox(height: 12),
           ],
-          _detayTablo(
-              _siralamaArtan ? _kayitlar : _kayitlar.reversed.toList(), docId),
+          _detayTablo(_kayitlar, docIds),
           const SizedBox(height: 32),
         ],
       ]),
