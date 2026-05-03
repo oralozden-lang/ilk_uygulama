@@ -78,7 +78,6 @@ class RaporlarWidgetState extends State<RaporlarWidget>
   int _secilenAy = DateTime.now().month;
   DateTime _baslangic = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _bitis = DateTime.now();
-  String? _secilenSube;
   Set<String> _secilenSubeler = {};
 
   bool _karsilastirmaAcik = false;
@@ -181,7 +180,7 @@ class RaporlarWidgetState extends State<RaporlarWidget>
     setState(() => _yukleniyor = true);
     try {
       final hedefSubeler =
-          _secilenSube != null ? [_secilenSube!] : _aktifSubeler;
+          _secilenSubeler.isEmpty ? _aktifSubeler : _secilenSubeler.toList();
       final donemKey = _baslangicKey().substring(0, 7);
 
       // ── Tüm sorgular tek seferde paralel ──────────────────────────────
@@ -244,7 +243,7 @@ class RaporlarWidgetState extends State<RaporlarWidget>
   }
 
   Future<List<Map<String, dynamic>>> _veriCek(String bas, String bit) async {
-    final hedefSubeler = _secilenSube != null ? [_secilenSube!] : _aktifSubeler;
+    final hedefSubeler = _secilenSubeler.isEmpty ? _aktifSubeler : _secilenSubeler.toList();
     final futures = hedefSubeler.map((sube) async {
       try {
         final snapshot = await FirebaseFirestore.instance
@@ -1224,19 +1223,37 @@ class RaporlarWidgetState extends State<RaporlarWidget>
                   ],
                   if (tumSubeler.length > 1) ...[
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String?>(
-                      value: _secilenSube,
-                      decoration: const InputDecoration(
-                          labelText: 'Şube',
-                          border: OutlineInputBorder(),
-                          isDense: true),
-                      items: [
-                        const DropdownMenuItem(
-                            value: null, child: Text('Tüm Şubeler')),
-                        ...tumSubeler.map((s) => DropdownMenuItem(
-                            value: s, child: Text(_subeAdlari[s] ?? s))),
+                    const Text('Şube',
+                        style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        FilterChip(
+                          label: const Text('Tümü'),
+                          selected: _secilenSubeler.isEmpty,
+                          onSelected: (_) =>
+                              setState(() => _secilenSubeler.clear()),
+                          selectedColor:
+                              const Color(0xFF0288D1).withOpacity(0.18),
+                          checkmarkColor: const Color(0xFF0288D1),
+                        ),
+                        ...tumSubeler.map((s) => FilterChip(
+                              label: Text(_subeAdlari[s] ?? s),
+                              selected: _secilenSubeler.contains(s),
+                              onSelected: (secildi) => setState(() {
+                                if (secildi) {
+                                  _secilenSubeler.add(s);
+                                } else {
+                                  _secilenSubeler.remove(s);
+                                }
+                              }),
+                              selectedColor:
+                                  const Color(0xFF0288D1).withOpacity(0.18),
+                              checkmarkColor: const Color(0xFF0288D1),
+                            )),
                       ],
-                      onChanged: (v) => setState(() => _secilenSube = v),
                     ),
                   ],
                   const SizedBox(height: 8),
@@ -1698,7 +1715,7 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
   int _secilenAy = DateTime.now().month;
   DateTime _baslangic = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _bitis = DateTime.now();
-  String? _secilenSube;
+  Set<String> _secilenSubeler = {};
   bool _karsilastirmaAcik = false;
   int _karsilastirmaYil = DateTime.now().year;
   int _karsilastirmaAy =
@@ -1829,7 +1846,7 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
       '${_pad2(dt.day)}.${_pad2(dt.month)}.${dt.year}';
 
   Future<List<Map<String, dynamic>>> _veriCek(String bas, String bit) async {
-    final hedefSubeler = _secilenSube != null ? [_secilenSube!] : _aktifSubeler;
+    final hedefSubeler = _secilenSubeler.isEmpty ? _aktifSubeler : _secilenSubeler.toList();
     final futures = hedefSubeler.map((sube) async {
       try {
         final snap = await FirebaseFirestore.instance
@@ -2569,19 +2586,37 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
               ],
               if (_aktifSubeler.length > 1) ...[
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  value: _secilenSube,
-                  decoration: const InputDecoration(
-                      labelText: 'Şube',
-                      border: OutlineInputBorder(),
-                      isDense: true),
-                  items: [
-                    const DropdownMenuItem(
-                        value: null, child: Text('Tüm Şubeler')),
-                    ..._aktifSubeler.map((s) => DropdownMenuItem(
-                        value: s, child: Text(_subeAdlari[s] ?? s))),
+                const Text('Şube',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    FilterChip(
+                      label: const Text('Tümü'),
+                      selected: _secilenSubeler.isEmpty,
+                      onSelected: (_) =>
+                          setState(() => _secilenSubeler.clear()),
+                      selectedColor:
+                          const Color(0xFF0288D1).withOpacity(0.18),
+                      checkmarkColor: const Color(0xFF0288D1),
+                    ),
+                    ..._aktifSubeler.map((s) => FilterChip(
+                          label: Text(_subeAdlari[s] ?? s),
+                          selected: _secilenSubeler.contains(s),
+                          onSelected: (secildi) => setState(() {
+                            if (secildi) {
+                              _secilenSubeler.add(s);
+                            } else {
+                              _secilenSubeler.remove(s);
+                            }
+                          }),
+                          selectedColor:
+                              const Color(0xFF0288D1).withOpacity(0.18),
+                          checkmarkColor: const Color(0xFF0288D1),
+                        )),
                   ],
-                  onChanged: (v) => setState(() => _secilenSube = v),
                 ),
               ],
               const SizedBox(height: 12),
@@ -2672,9 +2707,9 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
                   ]),
               ],
               const SizedBox(height: 12),
-              Row(children: [
-                Expanded(
-                    child: ElevatedButton.icon(
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
                   onPressed: _yukle,
                   icon: _yukleniyor
                       ? const SizedBox(
@@ -2687,23 +2722,8 @@ class _OdemeKanallariWidgetState extends State<OdemeKanallariWidget>
                   style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0288D1),
                       foregroundColor: Colors.white),
-                )),
-                const SizedBox(width: 8),
-                Text(_siralamaArtan ? 'Eskiden Yeniye' : 'Yeniden Eskiye',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                IconButton(
-                  icon: Icon(
-                      _siralamaArtan
-                          ? Icons.arrow_upward
-                          : Icons.arrow_downward,
-                      size: 18,
-                      color: const Color(0xFF0288D1)),
-                  onPressed: () =>
-                      setState(() => _siralamaArtan = !_siralamaArtan),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
                 ),
-              ]),
+              ),
             ]),
           ),
         ),
