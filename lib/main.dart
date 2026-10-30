@@ -1284,6 +1284,7 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
           final subeler = List<String>.from(data['subeler'] ?? []);
           final yonetici = data['yonetici'] == true;
 
+          if (yonetici && widget.yetki != KullaniciYetki.yonetici) return false;
           // Arama
           if (_kullaniciArama.isNotEmpty &&
               !k.id.toLowerCase().contains(_kullaniciArama.toLowerCase()))
@@ -1646,19 +1647,21 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                     },
                   ),
                 ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: yonetici,
-                      onChanged: (v) => setS(() {
-                        yonetici = v!;
-                        if (yonetici) seciliRolId = null;
-                      }),
-                    ),
-                    const Text('Yönetici (tüm şubeler)'),
-                  ],
-                ),
+                if (widget.yetki == KullaniciYetki.yonetici) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: yonetici,
+                        onChanged: (v) => setS(() {
+                          yonetici = v!;
+                          if (yonetici) seciliRolId = null;
+                        }),
+                      ),
+                      const Text('Yönetici (tüm şubeler)'),
+                    ],
+                  ),
+                ],
                 // Rol seçimi (yönetici değilse)
                 if (!yonetici) ...[
                   const SizedBox(height: 8),
@@ -1712,7 +1715,8 @@ class _YoneticiPaneliEkraniState extends State<YoneticiPaneliEkrani>
                     .set({
                   'parola': parolaCtrl.text.trim(),
                   'subeler': yonetici ? ['TUM'] : seciliSubeler,
-                  'yonetici': yonetici,
+                  'yonetici':
+                      yonetici && widget.yetki == KullaniciYetki.yonetici,
                   'aktif': true,
                   if (seciliRolId != null) 'rolId': seciliRolId,
                 });
